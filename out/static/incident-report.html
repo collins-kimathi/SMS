@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Incident - Union Group Security</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="incident-report">
+    <nav>
+        <h2>Union <span class="brand-accent">Security</span></h2>
+        <div class="nav-links">
+            <a href="dashboard.html">Dashboard</a>
+            <a href="visitor-registration.html">Register Visitor</a>
+            <a href="access-control.html">Access Control</a>
+            <a href="incident-report.html" class="is-active">Report Incident</a>
+            <a href="login.html" class="btn btn-danger btn-nav" data-logout>Logout</a>
+        </div>
+    </nav>
+
+    <div class="container animate-fade page-shell">
+        <div class="glass-panel form-panel">
+            <h2>Report a Security Incident</h2>
+            <p class="muted-block">Capture security events as they happen so the team can keep an accurate incident trail.</p>
+
+            <div id="incidentMessage" class="alert alert-success hidden"></div>
+
+            <form class="stacked-form" id="incidentForm">
+                <div class="form-group">
+                    <label for="title">Incident Title</label>
+                    <input type="text" id="title" name="title" required placeholder="Brief description of the incident">
+                </div>
+
+                <div class="form-group">
+                    <label for="severity">Severity</label>
+                    <select id="severity" name="severity" required>
+                        <option value="">Select severity</option>
+                        <option>Low</option>
+                        <option>Medium</option>
+                        <option>High</option>
+                        <option>Critical</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Detailed Description</label>
+                    <textarea id="description" name="description" rows="6" required placeholder="Provide a detailed account of what occurred"></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-primary full-width">Submit Incident Report</button>
+            </form>
+        </div>
+
+        <div class="glass-panel top-gap">
+            <h3>Incident Log</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Title</th>
+                        <th>Severity</th>
+                        <th>Reported By</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody id="incidentTable"></tbody>
+            </table>
+        </div>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>

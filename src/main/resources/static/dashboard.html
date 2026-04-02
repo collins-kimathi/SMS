@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Union Group Security</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="dashboard">
+    <nav>
+        <h2>Union <span class="brand-accent">Security</span></h2>
+        <div class="nav-links">
+            <a href="dashboard.html" class="is-active">Dashboard</a>
+            <a href="visitor-registration.html">Register Visitor</a>
+            <a href="access-control.html">Access Control</a>
+            <a href="incident-report.html">Report Incident</a>
+            <a href="login.html" class="btn btn-danger btn-nav" data-logout>Logout</a>
+        </div>
+    </nav>
+
+    <div class="container animate-fade page-shell">
+        <section class="hero-grid">
+            <div>
+                <p class="eyebrow">Operations Overview</p>
+                <h1 class="hero-title">Security operations dashboard</h1>
+                <p class="hero-copy">Monitor visitor flow, check active access activity, and review the latest incident reports in one place.</p>
+            </div>
+            <div class="glass-panel compact-panel">
+                <h3>Shift Summary</h3>
+                <p><strong>Signed in as:</strong> <span id="sessionUser">Operations Desk</span></p>
+                <p><strong>Date:</strong> <span id="currentDate">-</span></p>
+                <p><strong>Active visitors:</strong> <span id="activeVisitorsCount">0</span></p>
+            </div>
+        </section>
+
+        <div class="dashboard-grid">
+            <div class="glass-panel stat-card">
+                <p class="stat-label">Registered Visitors</p>
+                <h2 id="visitorCount">0</h2>
+                <p>Unique visitor profiles available for check-in.</p>
+            </div>
+
+            <div class="glass-panel stat-card">
+                <p class="stat-label">Open Visits</p>
+                <h2 id="openVisitsCount">0</h2>
+                <p>Visitors currently checked into the facility.</p>
+            </div>
+
+            <div class="glass-panel stat-card">
+                <p class="stat-label">Incidents Logged</p>
+                <h2 id="incidentCount">0</h2>
+                <p>Reports recorded by the security team.</p>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="glass-panel">
+                <h3>Quick Actions</h3>
+                <div class="action-list">
+                    <a href="visitor-registration.html" class="btn btn-primary">Register New Visitor</a>
+                    <a href="access-control.html" class="btn btn-secondary">Manage Access</a>
+                    <a href="incident-report.html" class="btn btn-secondary">Report Incident</a>
+                </div>
+            </div>
+
+            <div class="glass-panel">
+                <h3>Recent Incidents</h3>
+                <div id="incidentPreview" class="record-list empty-state">
+                    No incidents logged yet.
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-panel">
+            <h3>Recent Access Activity</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Visitor</th>
+                        <th>Host</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>Recorded By</th>
+                    </tr>
+                </thead>
+                <tbody id="dashboardAccessTable"></tbody>
+            </table>
+        </div>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>
