@@ -51,11 +51,36 @@ function formatToday() {
     }).format(new Date());
 }
 
-function protectRoute(page) {
+function normalizedRole(role) {
+    return String(role || "")
+        .toLowerCase()
+        .replace(/\s+/g, "");
+}
+
+function canAccessPage(page, session) {
     const publicPages = new Set(["login", "index"]);
+    if (publicPages.has(page)) {
+        return true;
+    }
+
+    if (!session) {
+        return false;
+    }
+
+    const role = normalizedRole(session.role);
+    const allowedPages = {
+        admin: new Set(["dashboard", "users", "reports"]),
+        security: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"]),
+        securityofficer: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"])
+    };
+
+    return (allowedPages[role] || new Set(["dashboard"])).has(page);
+}
+
+function protectRoute(page) {
     const session = getSession();
 
-    if (!publicPages.has(page) && !session) {
+    if (!session && !canAccessPage(page, null)) {
         window.location.href = "login.html";
         return false;
     }
@@ -65,7 +90,30 @@ function protectRoute(page) {
         return false;
     }
 
+    if (session && !canAccessPage(page, session)) {
+        window.location.href = "dashboard.html";
+        return false;
+    }
+
     return true;
+}
+
+function applyRolePermissions() {
+    const session = getSession();
+    if (!session) {
+        return;
+    }
+
+    const role = normalizedRole(session.role);
+    const restrictedPages = role === "admin"
+        ? new Set(["visitor-registration.html", "access-control.html", "incident-report.html"])
+        : new Set(["users.html", "reports.html"]);
+
+    document.querySelectorAll("a[href]").forEach((link) => {
+        if (restrictedPages.has(link.getAttribute("href"))) {
+            link.classList.add("hidden");
+        }
+    });
 }
 
 function bindLogout() {
@@ -111,6 +159,16 @@ async function loadAccessLogs() {
 
 async function loadIncidents() {
     return api("/api/incidents");
+}
+
+async function loadUsers() {
+    const session = getSession();
+    return api(`/api/users?userId=${encodeURIComponent(session ? session.userId : "")}`);
+}
+
+async function loadAccessReport(startDate, endDate) {
+    const session = getSession();
+    return api(`/api/reports/access?userId=${encodeURIComponent(session ? session.userId : "")}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
 
 async function renderVisitorTable() {
@@ -235,6 +293,10 @@ async function renderDashboard() {
     if (sessionUser) {
         sessionUser.textContent = session ? session.username : "Operations Desk";
     }
+    const sessionRole = document.getElementById("sessionRole");
+    if (sessionRole) {
+        sessionRole.textContent = session ? session.role : "-";
+    }
     if (currentDate) {
         currentDate.textContent = formatToday();
     }
@@ -264,6 +326,117 @@ async function renderDashboard() {
     }
 
     await renderAccessTable("dashboardAccessTable");
+
+    const securityActions = document.querySelectorAll("[href=\"visitor-registration.html\"], [href=\"access-control.html\"], [href=\"incident-report.html\"]");
+    const userActions = document.querySelectorAll("[href=\"users.html\"], [href=\"reports.html\"]");
+    const role = normalizedRole(session ? session.role : "");
+
+    securityActions.forEach((element) => {
+        if (role === "admin") {
+            element.classList.add("hidden");
+        }
+    });
+
+    userActions.forEach((element) => {
+        if (role !== "admin") {
+            element.classList.add("hidden");
+        }
+    });
+}
+
+async function renderUsersTable() {
+    const table = document.getElementById("usersTable");
+    if (!table) {
+        return [];
+    }
+
+    const users = await loadUsers();
+    const session = getSession();
+    table.innerHTML = users.length
+        ? users.map((user) => `
+            <tr>
+                <td>${user.userId}</td>
+                <td>${user.username}</td>
+                <td>${user.role}</td>
+                <td>
+                    <div class="inline-actions">
+                        <button type="button" class="btn btn-secondary btn-small" data-edit-user="${user.userId}">Edit</button>
+                        <button type="button" class="btn btn-danger btn-small" data-delete-user="${user.userId}" ${session && session.userId === user.userId ? "disabled" : ""}>Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `).join("")
+        : tableEmptyRow(4, "No users found.");
+
+    bindUserRowActions(users);
+    return users;
+}
+
+async function renderReportsTable(rows = []) {
+    const table = document.getElementById("reportsTable");
+    if (!table) {
+        return;
+    }
+
+    table.innerHTML = rows.length
+        ? rows.map((log) => `
+            <tr>
+                <td>${log.date}</td>
+                <td>${log.visitorName}</td>
+                <td>${log.host}</td>
+                <td>${String(log.entryTime).slice(0, 5)}</td>
+                <td>${log.exitTime ? String(log.exitTime).slice(0, 5) : "Still in building"}</td>
+                <td>${log.recordedBy}</td>
+            </tr>
+        `).join("")
+        : tableEmptyRow(6, "No records found for the selected date range.");
+}
+
+function bindUserRowActions(users) {
+    document.querySelectorAll("[data-edit-user]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const userId = Number(button.getAttribute("data-edit-user"));
+            const user = users.find((item) => item.userId === userId);
+            if (!user) {
+                return;
+            }
+
+            document.getElementById("editUserId").value = String(user.userId);
+            document.getElementById("editUsername").value = user.username;
+            document.getElementById("editRole").value = user.role;
+            document.getElementById("editPassword").value = "";
+            message("userMessage", `Editing ${user.username}. Update the fields and save changes.`);
+        });
+    });
+
+    document.querySelectorAll("[data-delete-user]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const session = getSession();
+            const targetUserId = button.getAttribute("data-delete-user");
+
+            if (!window.confirm("Delete this user account?")) {
+                return;
+            }
+
+            try {
+                await api("/api/users/delete", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: formBody({
+                        adminUserId: session ? String(session.userId) : "",
+                        targetUserId
+                    })
+                });
+
+                await renderUsersTable();
+                message("userMessage", "User deleted successfully.");
+            } catch (error) {
+                message("userMessage", error.message, true);
+            }
+        });
+    });
 }
 
 function bindLogin() {
@@ -310,6 +483,7 @@ function bindVisitorForm() {
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        const session = getSession();
 
         try {
             await api("/api/visitors", {
@@ -321,7 +495,8 @@ function bindVisitorForm() {
                     name: document.getElementById("name").value.trim(),
                     nationalId: document.getElementById("nationalId").value.trim(),
                     phoneNumber: document.getElementById("phoneNumber").value.trim(),
-                    purposeOfVisit: document.getElementById("purposeOfVisit").value.trim()
+                    purposeOfVisit: document.getElementById("purposeOfVisit").value.trim(),
+                    userId: session ? String(session.userId) : ""
                 })
             });
 
@@ -369,15 +544,17 @@ function bindAccessForms() {
     if (exitForm) {
         exitForm.addEventListener("submit", async (event) => {
             event.preventDefault();
+            const session = getSession();
 
             try {
                 await api("/api/access-logs/exit", {
                     method: "POST",
                     headers: {
-                        "Content-Type": "application/x-www-form-urlencoded"
+                    "Content-Type": "application/x-www-form-urlencoded"
                     },
                     body: formBody({
-                        visitorId: document.getElementById("exitVisitorId").value
+                        visitorId: document.getElementById("exitVisitorId").value,
+                        userId: session ? String(session.userId) : ""
                     })
                 });
 
@@ -425,6 +602,99 @@ function bindIncidentForm() {
     });
 }
 
+function bindUserForms() {
+    const createForm = document.getElementById("userCreateForm");
+    const editForm = document.getElementById("userEditForm");
+    if (!createForm || !editForm) {
+        return;
+    }
+
+    createForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const session = getSession();
+
+        try {
+            await api("/api/users", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formBody({
+                    adminUserId: session ? String(session.userId) : "",
+                    username: document.getElementById("newUsername").value.trim(),
+                    password: document.getElementById("newPassword").value.trim(),
+                    role: document.getElementById("newRole").value
+                })
+            });
+
+            createForm.reset();
+            await renderUsersTable();
+            message("userMessage", "User created successfully.");
+        } catch (error) {
+            message("userMessage", error.message, true);
+        }
+    });
+
+    editForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const session = getSession();
+
+        try {
+            await api("/api/users/update", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formBody({
+                    adminUserId: session ? String(session.userId) : "",
+                    targetUserId: document.getElementById("editUserId").value,
+                    username: document.getElementById("editUsername").value.trim(),
+                    password: document.getElementById("editPassword").value.trim(),
+                    role: document.getElementById("editRole").value
+                })
+            });
+
+            editForm.reset();
+            document.getElementById("editUserId").value = "";
+            await renderUsersTable();
+            message("userMessage", "User updated successfully.");
+        } catch (error) {
+            message("userMessage", error.message, true);
+        }
+    });
+}
+
+function bindReportForm() {
+    const form = document.getElementById("reportForm");
+    if (!form) {
+        return;
+    }
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const startDate = document.getElementById("reportStartDate").value;
+        const endDate = document.getElementById("reportEndDate").value;
+
+        if (!startDate || !endDate) {
+            message("reportMessage", "Select both start date and end date.", true);
+            return;
+        }
+
+        if (startDate > endDate) {
+            message("reportMessage", "Start date cannot be after end date.", true);
+            return;
+        }
+
+        try {
+            const rows = await loadAccessReport(startDate, endDate);
+            await renderReportsTable(rows);
+            message("reportMessage", `Report generated successfully. ${rows.length} record(s) found.`);
+        } catch (error) {
+            message("reportMessage", error.message, true);
+        }
+    });
+}
+
 async function initializePage(page) {
     switch (page) {
         case "dashboard":
@@ -442,6 +712,14 @@ async function initializePage(page) {
         case "incident-report":
             bindIncidentForm();
             await renderIncidentTable();
+            break;
+        case "users":
+            bindUserForms();
+            await renderUsersTable();
+            break;
+        case "reports":
+            bindReportForm();
+            await renderReportsTable([]);
             break;
         case "login":
             bindLogin();
@@ -464,11 +742,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     bindLogout();
+    applyRolePermissions();
 
     try {
         await initializePage(page);
     } catch (error) {
-        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : null;
+        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : page === "reports" ? "reportMessage" : null;
         if (targetId) {
             message(targetId, error.message || "Failed to load data.", true);
         }

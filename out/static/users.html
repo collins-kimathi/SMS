@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - Union Group Security</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="users">
+    <nav>
+        <h2>Union <span class="brand-accent">Security</span></h2>
+        <div class="nav-links">
+            <a href="dashboard.html">Dashboard</a>
+            <a href="users.html" class="is-active">User Management</a>
+            <a href="reports.html">Reports</a>
+            <a href="visitor-registration.html">Register Visitor</a>
+            <a href="access-control.html">Access Control</a>
+            <a href="incident-report.html">Report Incident</a>
+            <a href="login.html" class="btn btn-danger btn-nav" data-logout>Logout</a>
+        </div>
+    </nav>
+
+    <div class="container animate-fade page-shell">
+        <div class="dashboard-grid split-grid">
+            <div class="glass-panel">
+                <h2>Create User</h2>
+                <p class="muted-block">Add system accounts for administrators and security officers.</p>
+                <div id="userMessage" class="alert alert-success hidden"></div>
+
+                <form class="stacked-form" id="userCreateForm">
+                    <div class="form-group">
+                        <label for="newUsername">Username</label>
+                        <input type="text" id="newUsername" required placeholder="Enter username">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="newPassword">Password</label>
+                        <input type="password" id="newPassword" required placeholder="Enter password">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="newRole">Role</label>
+                        <select id="newRole" required>
+                            <option value="">Select role</option>
+                            <option value="Admin">Admin</option>
+                            <option value="Security">Security Officer</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary full-width">Create User</button>
+                </form>
+            </div>
+
+            <div class="glass-panel">
+                <h2>Edit User</h2>
+                <p class="muted-block">Select a user below to update their role, username, or password.</p>
+
+                <form class="stacked-form" id="userEditForm">
+                    <input type="hidden" id="editUserId">
+
+                    <div class="form-group">
+                        <label for="editUsername">Username</label>
+                        <input type="text" id="editUsername" required placeholder="Select a user first">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editPassword">New Password</label>
+                        <input type="password" id="editPassword" placeholder="Leave blank to keep current password">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editRole">Role</label>
+                        <select id="editRole" required>
+                            <option value="">Select role</option>
+                            <option value="Admin">Admin</option>
+                            <option value="Security">Security Officer</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-secondary full-width">Update User</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="glass-panel top-gap">
+            <h3>System Users</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTable"></tbody>
+            </table>
+        </div>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -10,6 +10,9 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.Date;
 import java.sql.DriverManager;
@@ -21,10 +24,13 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 
 public class SmsApplication {
 
@@ -33,6 +39,10 @@ public class SmsApplication {
     private static final String DB_URL = envOrDefault("SMS_DB_URL", "jdbc:mysql://localhost:3306/sms_db?serverTimezone=UTC");
     private static final String DB_USER = envOrDefault("SMS_DB_USER", "root");
     private static final String DB_PASSWORD = envOrDefault("SMS_DB_PASSWORD", "1234");
+    private static final String PASSWORD_SCHEME = "pbkdf2";
+    private static final int PASSWORD_ITERATIONS = 65536;
+    private static final int PASSWORD_KEY_LENGTH = 256;
+    private static final int PASSWORD_SALT_BYTES = 16;
     private static final Map<String, String> CONTENT_TYPES = new HashMap<>();
 
     static {
@@ -48,6 +58,7 @@ public class SmsApplication {
 
     public static void main(String[] args) throws IOException {
         int port = resolvePort(args);
+        initializeSecurityState();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/", SmsApplication::handleRequest);
         server.setExecutor(null);
@@ -120,12 +131,37 @@ public class SmsApplication {
                         sendMethodNotAllowed(exchange);
                     }
                     break;
+                case "/api/users":
+                    if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        handleUsersList(exchange);
+                    } else if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        handleCreateUser(exchange);
+                    } else {
+                        sendMethodNotAllowed(exchange);
+                    }
+                    break;
+                case "/api/users/update":
+                    requireMethod(exchange, "POST");
+                    handleUpdateUser(exchange);
+                    break;
+                case "/api/users/delete":
+                    requireMethod(exchange, "POST");
+                    handleDeleteUser(exchange);
+                    break;
+                case "/api/reports/access":
+                    requireMethod(exchange, "GET");
+                    handleAccessReport(exchange);
+                    break;
                 default:
                     sendJson(exchange, 404, "{\"message\":\"Endpoint not found\"}");
                     break;
             }
+        } catch (IllegalArgumentException exception) {
+            sendJson(exchange, 400, "{\"message\":\"" + escapeJson(exception.getMessage()) + "\"}");
         } catch (IllegalStateException exception) {
             sendJson(exchange, 405, "{\"message\":\"" + escapeJson(exception.getMessage()) + "\"}");
+        } catch (SecurityException exception) {
+            sendJson(exchange, 403, "{\"message\":\"" + escapeJson(exception.getMessage()) + "\"}");
         } catch (SQLException exception) {
             exception.printStackTrace();
             sendJson(exchange, 500, "{\"message\":\"Database error\",\"detail\":\"" + escapeJson(exception.getMessage()) + "\"}");
@@ -145,17 +181,24 @@ public class SmsApplication {
             return;
         }
 
-        String sql = "SELECT user_id, username, role FROM users WHERE username = ? AND password = ?";
+        String sql = "SELECT user_id, username, password, role FROM users WHERE username = ?";
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, username);
-            statement.setString(2, password);
 
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
                     sendJson(exchange, 401, "{\"message\":\"Invalid login credentials\"}");
                     return;
                 }
+
+                String storedPassword = resultSet.getString("password");
+                if (!verifyPassword(password, storedPassword)) {
+                    sendJson(exchange, 401, "{\"message\":\"Invalid login credentials\"}");
+                    return;
+                }
+
+                upgradeLegacyPasswordIfNeeded(connection, resultSet.getInt("user_id"), storedPassword, password);
 
                 String response = "{"
                     + "\"userId\":" + resultSet.getInt("user_id") + ","
@@ -194,6 +237,7 @@ public class SmsApplication {
         String nationalId = trim(form.get("nationalId"));
         String phoneNumber = trim(form.get("phoneNumber"));
         String purposeOfVisit = trim(form.get("purposeOfVisit"));
+        int userId = parseRequiredInt(form.get("userId"), "User is required");
 
         if (name.isEmpty() || nationalId.isEmpty() || phoneNumber.isEmpty() || purposeOfVisit.isEmpty()) {
             sendJson(exchange, 400, "{\"message\":\"All visitor fields are required\"}");
@@ -201,6 +245,8 @@ public class SmsApplication {
         }
 
         try (Connection connection = getConnection()) {
+            requireSecurityOfficer(connection, userId);
+
             if (visitorExists(connection, nationalId)) {
                 sendJson(exchange, 409, "{\"message\":\"Visitor already registered\"}");
                 return;
@@ -275,20 +321,13 @@ public class SmsApplication {
 
     private static void handleRecordEntry(HttpExchange exchange) throws IOException, SQLException {
         Map<String, String> form = parseFormBody(exchange);
-        String visitorIdRaw = trim(form.get("visitorId"));
-        String employeeIdRaw = trim(form.get("employeeId"));
-        String userIdRaw = trim(form.get("userId"));
-
-        if (visitorIdRaw.isEmpty() || employeeIdRaw.isEmpty() || userIdRaw.isEmpty()) {
-            sendJson(exchange, 400, "{\"message\":\"Missing required information\"}");
-            return;
-        }
-
-        int visitorId = Integer.parseInt(visitorIdRaw);
-        int employeeId = Integer.parseInt(employeeIdRaw);
-        int userId = Integer.parseInt(userIdRaw);
+        int visitorId = parseRequiredInt(form.get("visitorId"), "Visitor is required");
+        int employeeId = parseRequiredInt(form.get("employeeId"), "Employee is required");
+        int userId = parseRequiredInt(form.get("userId"), "User is required");
 
         try (Connection connection = getConnection()) {
+            requireSecurityOfficer(connection, userId);
+
             if (hasActiveAccessLog(connection, visitorId)) {
                 sendJson(exchange, 409, "{\"message\":\"Visitor already has an active access record\"}");
                 return;
@@ -310,25 +349,22 @@ public class SmsApplication {
 
     private static void handleRecordExit(HttpExchange exchange) throws IOException, SQLException {
         Map<String, String> form = parseFormBody(exchange);
-        String visitorIdRaw = trim(form.get("visitorId"));
-
-        if (visitorIdRaw.isEmpty()) {
-            sendJson(exchange, 400, "{\"message\":\"Visitor is required\"}");
-            return;
-        }
-
-        int visitorId = Integer.parseInt(visitorIdRaw);
+        int visitorId = parseRequiredInt(form.get("visitorId"), "Visitor is required");
+        int userId = parseRequiredInt(form.get("userId"), "User is required");
         String sql = "UPDATE access_logs SET exit_time = ? WHERE visitor_id = ? AND exit_time IS NULL ORDER BY log_id DESC LIMIT 1";
 
-        try (Connection connection = getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setTime(1, Time.valueOf(LocalTime.now().withSecond(0).withNano(0)));
-            statement.setInt(2, visitorId);
-            int updated = statement.executeUpdate();
+        try (Connection connection = getConnection()) {
+            requireSecurityOfficer(connection, userId);
 
-            if (updated == 0) {
-                sendJson(exchange, 404, "{\"message\":\"No active record found\"}");
-                return;
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setTime(1, Time.valueOf(LocalTime.now().withSecond(0).withNano(0)));
+                statement.setInt(2, visitorId);
+                int updated = statement.executeUpdate();
+
+                if (updated == 0) {
+                    sendJson(exchange, 404, "{\"message\":\"No active record found\"}");
+                    return;
+                }
             }
         }
 
@@ -367,27 +403,212 @@ public class SmsApplication {
         String title = trim(form.get("title"));
         String severity = trim(form.get("severity"));
         String description = trim(form.get("description"));
-        String userIdRaw = trim(form.get("userId"));
+        int userId = parseRequiredInt(form.get("userId"), "User is required");
 
-        if (title.isEmpty() || severity.isEmpty() || description.isEmpty() || userIdRaw.isEmpty()) {
+        if (title.isEmpty() || severity.isEmpty() || description.isEmpty()) {
             sendJson(exchange, 400, "{\"message\":\"All incident fields are required\"}");
             return;
         }
 
-        int userId = Integer.parseInt(userIdRaw);
         String sql = "INSERT INTO incidents (title, description, severity, user_id, reported_at) VALUES (?, ?, ?, ?, ?)";
 
-        try (Connection connection = getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, title);
-            statement.setString(2, description);
-            statement.setString(3, severity);
-            statement.setInt(4, userId);
-            statement.setTimestamp(5, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
-            statement.executeUpdate();
+        try (Connection connection = getConnection()) {
+            requireSecurityOfficer(connection, userId);
+
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, title);
+                statement.setString(2, description);
+                statement.setString(3, severity);
+                statement.setInt(4, userId);
+                statement.setTimestamp(5, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
+                statement.executeUpdate();
+            }
         }
 
         sendJson(exchange, 201, "{\"message\":\"Incident report saved successfully\"}");
+    }
+
+    private static void handleUsersList(HttpExchange exchange) throws IOException, SQLException {
+        Map<String, String> query = parseQuery(exchange.getRequestURI());
+        int userId = parseRequiredInt(query.get("userId"), "User is required");
+        String sql = "SELECT user_id, username, role FROM users ORDER BY user_id ASC";
+        List<String> rows = new ArrayList<>();
+
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            requireAdmin(connection, userId);
+
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add("{"
+                        + "\"userId\":" + resultSet.getInt("user_id") + ","
+                        + "\"username\":\"" + escapeJson(resultSet.getString("username")) + "\","
+                        + "\"role\":\"" + escapeJson(resultSet.getString("role")) + "\""
+                        + "}");
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
+    }
+
+    private static void handleCreateUser(HttpExchange exchange) throws IOException, SQLException {
+        Map<String, String> form = parseFormBody(exchange);
+        int adminUserId = parseRequiredInt(form.get("adminUserId"), "Admin user is required");
+        String username = trim(form.get("username"));
+        String password = trim(form.get("password"));
+        String role = trim(form.get("role"));
+
+        if (username.isEmpty() || password.isEmpty() || role.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"All user fields are required\"}");
+            return;
+        }
+
+        try (Connection connection = getConnection()) {
+            requireAdmin(connection, adminUserId);
+
+            if (usernameExists(connection, username, null)) {
+                sendJson(exchange, 409, "{\"message\":\"Username already exists\"}");
+                return;
+            }
+
+            String sql = "INSERT INTO users (username, password, role) VALUES (?, ?, ?)";
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, username);
+                statement.setString(2, hashPassword(password));
+                statement.setString(3, role);
+                statement.executeUpdate();
+            }
+        }
+
+        sendJson(exchange, 201, "{\"message\":\"User created successfully\"}");
+    }
+
+    private static void handleUpdateUser(HttpExchange exchange) throws IOException, SQLException {
+        Map<String, String> form = parseFormBody(exchange);
+        int adminUserId = parseRequiredInt(form.get("adminUserId"), "Admin user is required");
+        int targetUserId = parseRequiredInt(form.get("targetUserId"), "Target user is required");
+        String username = trim(form.get("username"));
+        String password = trim(form.get("password"));
+        String role = trim(form.get("role"));
+
+        if (username.isEmpty() || role.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Username and role are required\"}");
+            return;
+        }
+
+        try (Connection connection = getConnection()) {
+            requireAdmin(connection, adminUserId);
+
+            if (usernameExists(connection, username, targetUserId)) {
+                sendJson(exchange, 409, "{\"message\":\"Username already exists\"}");
+                return;
+            }
+
+            String sql = password.isEmpty()
+                ? "UPDATE users SET username = ?, role = ? WHERE user_id = ?"
+                : "UPDATE users SET username = ?, password = ?, role = ? WHERE user_id = ?";
+
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, username);
+                if (password.isEmpty()) {
+                    statement.setString(2, role);
+                    statement.setInt(3, targetUserId);
+                } else {
+                    statement.setString(2, hashPassword(password));
+                    statement.setString(3, role);
+                    statement.setInt(4, targetUserId);
+                }
+
+                int updated = statement.executeUpdate();
+                if (updated == 0) {
+                    sendJson(exchange, 404, "{\"message\":\"User not found\"}");
+                    return;
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"User updated successfully\"}");
+    }
+
+    private static void handleDeleteUser(HttpExchange exchange) throws IOException, SQLException {
+        Map<String, String> form = parseFormBody(exchange);
+        int adminUserId = parseRequiredInt(form.get("adminUserId"), "Admin user is required");
+        int targetUserId = parseRequiredInt(form.get("targetUserId"), "Target user is required");
+
+        if (adminUserId == targetUserId) {
+            sendJson(exchange, 400, "{\"message\":\"You cannot delete the currently signed-in admin\"}");
+            return;
+        }
+
+        try (Connection connection = getConnection()) {
+            requireAdmin(connection, adminUserId);
+
+            String sql = "DELETE FROM users WHERE user_id = ?";
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setInt(1, targetUserId);
+                int deleted = statement.executeUpdate();
+                if (deleted == 0) {
+                    sendJson(exchange, 404, "{\"message\":\"User not found\"}");
+                    return;
+                }
+            } catch (SQLException exception) {
+                if (exception.getErrorCode() == 1451) {
+                    sendJson(exchange, 409, "{\"message\":\"User cannot be deleted because there are related records\"}");
+                    return;
+                }
+                throw exception;
+            }
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"User deleted successfully\"}");
+    }
+
+    private static void handleAccessReport(HttpExchange exchange) throws IOException, SQLException {
+        Map<String, String> query = parseQuery(exchange.getRequestURI());
+        int userId = parseRequiredInt(query.get("userId"), "User is required");
+        String startDate = trim(query.get("startDate"));
+        String endDate = trim(query.get("endDate"));
+
+        if (startDate.isEmpty() || endDate.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Select both start date and end date\"}");
+            return;
+        }
+
+        String sql = ""
+            + "SELECT al.log_id, al.visit_date, al.entry_time, al.exit_time, v.name AS visitor_name, "
+            + "e.name AS employee_name, e.department, u.username "
+            + "FROM access_logs al "
+            + "JOIN visitors v ON al.visitor_id = v.visitor_id "
+            + "JOIN employees e ON al.employee_id = e.employee_id "
+            + "JOIN users u ON al.user_id = u.user_id "
+            + "WHERE al.visit_date BETWEEN ? AND ? "
+            + "ORDER BY al.visit_date DESC, al.log_id DESC";
+
+        List<String> rows = new ArrayList<>();
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            requireAdmin(connection, userId);
+            statement.setDate(1, Date.valueOf(startDate));
+            statement.setDate(2, Date.valueOf(endDate));
+
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    String exitTime = resultSet.getTime("exit_time") == null ? "" : resultSet.getTime("exit_time").toString();
+                    rows.add("{"
+                        + "\"id\":" + resultSet.getInt("log_id") + ","
+                        + "\"date\":\"" + resultSet.getDate("visit_date") + "\","
+                        + "\"visitorName\":\"" + escapeJson(resultSet.getString("visitor_name")) + "\","
+                        + "\"host\":\"" + escapeJson(resultSet.getString("employee_name") + " (" + resultSet.getString("department") + ")") + "\","
+                        + "\"entryTime\":\"" + resultSet.getTime("entry_time") + "\","
+                        + "\"exitTime\":\"" + escapeJson(exitTime) + "\","
+                        + "\"recordedBy\":\"" + escapeJson(resultSet.getString("username")) + "\""
+                        + "}");
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
     private static boolean visitorExists(Connection connection, String nationalId) throws SQLException {
@@ -407,6 +628,175 @@ public class SmsApplication {
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next();
             }
+        }
+    }
+
+    private static void requireSecurityOfficer(Connection connection, int userId) throws SQLException {
+        String role = findUserRole(connection, userId);
+        if (!isSecurityRole(role)) {
+            throw new SecurityException("Only Security Officers can perform this action");
+        }
+    }
+
+    private static void requireAdmin(Connection connection, int userId) throws SQLException {
+        String role = findUserRole(connection, userId);
+        if (!isAdminRole(role)) {
+            throw new SecurityException("Only Admin users can perform this action");
+        }
+    }
+
+    private static String findUserRole(Connection connection, int userId) throws SQLException {
+        String sql = "SELECT role FROM users WHERE user_id = ? LIMIT 1";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, userId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new SecurityException("User account not found");
+                }
+                return defaultString(resultSet.getString("role"), "");
+            }
+        }
+    }
+
+    private static boolean isSecurityRole(String role) {
+        String normalizedRole = defaultString(role, "").toLowerCase().replace(" ", "");
+        return "security".equals(normalizedRole) || "securityofficer".equals(normalizedRole);
+    }
+
+    private static boolean isAdminRole(String role) {
+        return "admin".equals(defaultString(role, "").toLowerCase().replace(" ", ""));
+    }
+
+    private static boolean usernameExists(Connection connection, String username, Integer excludedUserId) throws SQLException {
+        String sql = excludedUserId == null
+            ? "SELECT 1 FROM users WHERE username = ? LIMIT 1"
+            : "SELECT 1 FROM users WHERE username = ? AND user_id <> ? LIMIT 1";
+
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, username);
+            if (excludedUserId != null) {
+                statement.setInt(2, excludedUserId);
+            }
+
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private static int parseRequiredInt(String value, String message) {
+        String trimmedValue = trim(value);
+        if (trimmedValue.isEmpty()) {
+            throw new IllegalArgumentException(message);
+        }
+
+        try {
+            return Integer.parseInt(trimmedValue);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(message, exception);
+        }
+    }
+
+    private static void initializeSecurityState() throws IOException {
+        try (Connection connection = getConnection()) {
+            ensureDefaultUser(connection, "admin", "1234", "Admin");
+            ensureDefaultUser(connection, "officer", "1234", "Security");
+        } catch (SQLException exception) {
+            throw new IOException("Failed to initialize security state", exception);
+        }
+    }
+
+    private static void ensureDefaultUser(Connection connection, String username, String password, String role) throws SQLException {
+        String selectSql = "SELECT user_id, password FROM users WHERE username = ? LIMIT 1";
+        try (PreparedStatement statement = connection.prepareStatement(selectSql)) {
+            statement.setString(1, username);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    String storedPassword = resultSet.getString("password");
+                    if (!isHashedPassword(storedPassword) && password.equals(storedPassword)) {
+                        updateStoredPassword(connection, resultSet.getInt("user_id"), hashPassword(password));
+                    }
+                    return;
+                }
+            }
+        }
+
+        String insertSql = "INSERT INTO users (username, password, role) VALUES (?, ?, ?)";
+        try (PreparedStatement statement = connection.prepareStatement(insertSql)) {
+            statement.setString(1, username);
+            statement.setString(2, hashPassword(password));
+            statement.setString(3, role);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void upgradeLegacyPasswordIfNeeded(Connection connection, int userId, String storedPassword, String rawPassword) throws SQLException {
+        if (isHashedPassword(storedPassword)) {
+            return;
+        }
+
+        if (rawPassword.equals(storedPassword)) {
+            updateStoredPassword(connection, userId, hashPassword(rawPassword));
+        }
+    }
+
+    private static void updateStoredPassword(Connection connection, int userId, String hashedPassword) throws SQLException {
+        String sql = "UPDATE users SET password = ? WHERE user_id = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, hashedPassword);
+            statement.setInt(2, userId);
+            statement.executeUpdate();
+        }
+    }
+
+    private static boolean verifyPassword(String rawPassword, String storedPassword) {
+        if (storedPassword == null || storedPassword.isBlank()) {
+            return false;
+        }
+
+        if (!isHashedPassword(storedPassword)) {
+            return rawPassword.equals(storedPassword);
+        }
+
+        try {
+            String[] parts = storedPassword.split("\\$");
+            if (parts.length != 4 || !PASSWORD_SCHEME.equals(parts[0])) {
+                return false;
+            }
+
+            int iterations = Integer.parseInt(parts[1]);
+            byte[] salt = Base64.getDecoder().decode(parts[2]);
+            byte[] expected = Base64.getDecoder().decode(parts[3]);
+            byte[] actual = pbkdf2(rawPassword.toCharArray(), salt, iterations);
+            return MessageDigest.isEqual(expected, actual);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private static boolean isHashedPassword(String storedPassword) {
+        return storedPassword != null && storedPassword.startsWith(PASSWORD_SCHEME + "$");
+    }
+
+    private static String hashPassword(String rawPassword) {
+        byte[] salt = new byte[PASSWORD_SALT_BYTES];
+        new SecureRandom().nextBytes(salt);
+        byte[] hash = pbkdf2(rawPassword.toCharArray(), salt, PASSWORD_ITERATIONS);
+        return PASSWORD_SCHEME
+            + "$" + PASSWORD_ITERATIONS
+            + "$" + Base64.getEncoder().encodeToString(salt)
+            + "$" + Base64.getEncoder().encodeToString(hash);
+    }
+
+    private static byte[] pbkdf2(char[] password, byte[] salt, int iterations) {
+        PBEKeySpec spec = new PBEKeySpec(password, salt, iterations, PASSWORD_KEY_LENGTH);
+        try {
+            SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            return factory.generateSecret(spec).getEncoded();
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("Password hashing failed", exception);
+        } finally {
+            spec.clearPassword();
         }
     }
 
@@ -449,6 +839,27 @@ public class SmsApplication {
             values.put(key, value);
         }
 
+        return values;
+    }
+
+    private static Map<String, String> parseQuery(URI uri) {
+        Map<String, String> values = new LinkedHashMap<>();
+        String query = uri.getRawQuery();
+        if (query == null || query.isBlank()) {
+            return values;
+        }
+
+        String[] pairs = query.split("&");
+        for (String pair : pairs) {
+            if (pair.isBlank()) {
+                continue;
+            }
+
+            String[] entry = pair.split("=", 2);
+            String key = decode(entry[0]);
+            String value = entry.length > 1 ? decode(entry[1]) : "";
+            values.put(key, value);
+        }
         return values;
     }
 
