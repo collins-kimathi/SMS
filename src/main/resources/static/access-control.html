@@ -12,6 +12,7 @@
         <div class="nav-links">
             <a href="dashboard.html">Dashboard</a>
             <a href="users.html">User Management</a>
+            <a href="employees.html">Employee Management</a>
             <a href="reports.html">Reports</a>
             <a href="visitor-registration.html">Register Visitor</a>
             <a href="access-control.html" class="is-active">Access Control</a>
@@ -34,13 +35,7 @@
 
                     <div class="form-group">
                         <label for="employeeId">Host Employee</label>
-                        <select id="employeeId" name="employeeId" required>
-                            <option value="">Select host employee</option>
-                            <option>Mary Wanjiku (Operations)</option>
-                            <option>Brian Ouma (IT)</option>
-                            <option>Kevin Langat (Finance)</option>
-                            <option>Joan Naliaka (Human Resources)</option>
-                        </select>
+                        <select id="employeeId" name="employeeId" required></select>
                     </div>
 
                     <button type="submit" class="btn btn-primary full-width">Record Entry</button>
@@ -60,6 +55,46 @@
             </div>
         </div>
 
+        <div class="glass-panel top-gap">
+            <h3>Edit Access Record</h3>
+            <p class="muted-block">Use this form to correct the host employee, date, or entry and exit times for an existing record.</p>
+
+            <form class="stacked-form" id="accessEditForm">
+                <input type="hidden" id="editLogId">
+
+                <div class="dashboard-grid split-grid">
+                    <div class="form-group">
+                        <label for="editVisitorId">Visitor</label>
+                        <select id="editVisitorId" required></select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editEmployeeId">Host Employee</label>
+                        <select id="editEmployeeId" required></select>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid split-grid">
+                    <div class="form-group">
+                        <label for="editVisitDate">Visit Date</label>
+                        <input type="date" id="editVisitDate" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editEntryTime">Entry Time</label>
+                        <input type="time" id="editEntryTime" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="editExitTime">Exit Time</label>
+                    <input type="time" id="editExitTime">
+                </div>
+
+                <button type="submit" class="btn btn-secondary full-width">Update Access Record</button>
+            </form>
+        </div>
+
         <div class="glass-panel">
             <h3>Access Logs</h3>
             <table>
@@ -71,6 +106,7 @@
                         <th>Entry Time</th>
                         <th>Exit Time</th>
                         <th>Recorded By</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="accessTable"></tbody>

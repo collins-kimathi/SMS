@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Management - Union Group Security</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="employees">
+    <nav>
+        <h2>Union <span class="brand-accent">Security</span></h2>
+        <div class="nav-links">
+            <a href="dashboard.html">Dashboard</a>
+            <a href="users.html">User Management</a>
+            <a href="employees.html" class="is-active">Employee Management</a>
+            <a href="reports.html">Reports</a>
+            <a href="visitor-registration.html">Register Visitor</a>
+            <a href="access-control.html">Access Control</a>
+            <a href="incident-report.html">Report Incident</a>
+            <a href="login.html" class="btn btn-danger btn-nav" data-logout>Logout</a>
+        </div>
+    </nav>
+
+    <div class="container animate-fade page-shell">
+        <div class="dashboard-grid split-grid">
+            <div class="glass-panel">
+                <h2>Create Employee</h2>
+                <p class="muted-block">Maintain the employee directory used for host assignment in access control.</p>
+                <div id="employeeMessage" class="alert alert-success hidden"></div>
+
+                <form class="stacked-form" id="employeeCreateForm">
+                    <div class="form-group">
+                        <label for="employeeName">Full Name</label>
+                        <input type="text" id="employeeName" required placeholder="Enter employee name">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="employeeDepartment">Department</label>
+                        <input type="text" id="employeeDepartment" required placeholder="Enter department">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="employeePhone">Phone Number</label>
+                        <input type="text" id="employeePhone" placeholder="Enter phone number">
+                    </div>
+
+                    <button type="submit" class="btn btn-primary full-width">Create Employee</button>
+                </form>
+            </div>
+
+            <div class="glass-panel">
+                <h2>Edit Employee</h2>
+                <p class="muted-block">Select an employee below to update their details.</p>
+
+                <form class="stacked-form" id="employeeEditForm">
+                    <input type="hidden" id="editEmployeeId">
+
+                    <div class="form-group">
+                        <label for="editEmployeeName">Full Name</label>
+                        <input type="text" id="editEmployeeName" required placeholder="Select an employee first">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editEmployeeDepartment">Department</label>
+                        <input type="text" id="editEmployeeDepartment" required placeholder="Enter department">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editEmployeePhone">Phone Number</label>
+                        <input type="text" id="editEmployeePhone" placeholder="Enter phone number">
+                    </div>
+
+                    <button type="submit" class="btn btn-secondary full-width">Update Employee</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="glass-panel top-gap">
+            <h3>Employee Directory</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Department</th>
+                        <th>Phone</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="employeesTable"></tbody>
+            </table>
+        </div>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.security.spec.InvalidKeySpecException;
 import java.sql.Connection;
 import java.sql.Date;
 import java.sql.DriverManager;
@@ -27,7 +28,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 
 public class SmsApplication {
 
@@ -38,8 +40,10 @@ public class SmsApplication {
     private static final String DB_URL = envOrDefault("SMS_DB_URL", "jdbc:mysql://localhost:3306/sms_db?serverTimezone=UTC");
     private static final String DB_USER = envOrDefault("SMS_DB_USER", "root");
     private static final String DB_PASSWORD = envOrDefault("SMS_DB_PASSWORD", "1234");
+    private static final String PASSWORD_PREFIX = "pbkdf2$";
+    private static final int PASSWORD_ITERATIONS = 120000;
+    private static final int PASSWORD_KEY_LENGTH = 256;
     private static final Map<String, String> CONTENT_TYPES = new HashMap<>();
-    private static final Map<String, SessionInfo> SESSIONS = new ConcurrentHashMap<>();
     private static final SecureRandom SESSION_RANDOM = new SecureRandom();
 
     static {
@@ -111,9 +115,29 @@ public class SmsApplication {
                         sendMethodNotAllowed(exchange);
                     }
                     break;
+                case "/api/visitors/update":
+                    requireMethod(exchange, "POST");
+                    handleUpdateVisitor(exchange);
+                    break;
+                case "/api/visitors/delete":
+                    requireMethod(exchange, "POST");
+                    handleDeleteVisitor(exchange);
+                    break;
                 case "/api/employees":
                     requireMethod(exchange, "GET");
                     handleEmployeesList(exchange);
+                    break;
+                case "/api/employees/create":
+                    requireMethod(exchange, "POST");
+                    handleCreateEmployee(exchange);
+                    break;
+                case "/api/employees/update":
+                    requireMethod(exchange, "POST");
+                    handleUpdateEmployee(exchange);
+                    break;
+                case "/api/employees/delete":
+                    requireMethod(exchange, "POST");
+                    handleDeleteEmployee(exchange);
                     break;
                 case "/api/access-logs":
                     requireMethod(exchange, "GET");
@@ -127,6 +151,14 @@ public class SmsApplication {
                     requireMethod(exchange, "POST");
                     handleRecordExit(exchange);
                     break;
+                case "/api/access-logs/update":
+                    requireMethod(exchange, "POST");
+                    handleUpdateAccessLog(exchange);
+                    break;
+                case "/api/access-logs/delete":
+                    requireMethod(exchange, "POST");
+                    handleDeleteAccessLog(exchange);
+                    break;
                 case "/api/incidents":
                     if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
                         handleIncidentsList(exchange);
@@ -135,6 +167,10 @@ public class SmsApplication {
                     } else {
                         sendMethodNotAllowed(exchange);
                     }
+                    break;
+                case "/api/incidents/update":
+                    requireMethod(exchange, "POST");
+                    handleUpdateIncident(exchange);
                     break;
                 case "/api/users":
                     if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -156,6 +192,22 @@ public class SmsApplication {
                 case "/api/reports/access":
                     requireMethod(exchange, "GET");
                     handleAccessReport(exchange);
+                    break;
+                case "/api/reports/incidents":
+                    requireMethod(exchange, "GET");
+                    handleIncidentReport(exchange);
+                    break;
+                case "/api/reports/visitors":
+                    requireMethod(exchange, "GET");
+                    handleVisitorReport(exchange);
+                    break;
+                case "/api/reports/audit":
+                    requireMethod(exchange, "GET");
+                    handleAuditReport(exchange);
+                    break;
+                case "/api/reports/export":
+                    requireMethod(exchange, "GET");
+                    handleExportReport(exchange);
                     break;
                 default:
                     sendJson(exchange, 404, "{\"message\":\"Endpoint not found\"}");
@@ -188,11 +240,10 @@ public class SmsApplication {
             return;
         }
 
-        String sql = "SELECT user_id, username, role FROM users WHERE username = ? AND password = ?";
+        String sql = "SELECT user_id, username, password, role FROM users WHERE username = ?";
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, username);
-            statement.setString(2, password);
 
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
@@ -200,11 +251,22 @@ public class SmsApplication {
                     return;
                 }
 
+                String storedPassword = defaultString(resultSet.getString("password"), "");
+                if (!verifyPassword(password, storedPassword)) {
+                    sendJson(exchange, 401, "{\"message\":\"Invalid login credentials\"}");
+                    return;
+                }
+
+                upgradePlainTextPasswordIfNeeded(connection, resultSet.getInt("user_id"), storedPassword);
+
                 SessionInfo session = createSession(
+                    connection,
                     resultSet.getInt("user_id"),
                     resultSet.getString("username"),
                     defaultString(resultSet.getString("role"), "Security")
                 );
+                recordAuditAction(connection, session.userId, "LOGIN", "session", session.sessionId,
+                    "User signed in");
                 setSessionCookie(exchange, session.sessionId);
 
                 String response = "{"
@@ -225,7 +287,13 @@ public class SmsApplication {
     private static void handleLogout(HttpExchange exchange) throws IOException {
         SessionInfo session = getOptionalSession(exchange);
         if (session != null) {
-            SESSIONS.remove(session.sessionId);
+            try (Connection connection = getConnection()) {
+                deleteSession(connection, session.sessionId);
+                recordAuditAction(connection, session.userId, "LOGOUT", "session", session.sessionId,
+                    "User signed out");
+            } catch (SQLException exception) {
+                throw new IOException("Failed to end session", exception);
+            }
         }
         clearSessionCookie(exchange);
         sendJson(exchange, 200, "{\"message\":\"Logged out successfully\"}");
@@ -274,17 +342,84 @@ public class SmsApplication {
                 return;
             }
 
-            String sql = "INSERT INTO visitors (name, national_id, phone_number, purpose_of_visit) VALUES (?, ?, ?, ?)";
+            String sql = "INSERT INTO visitors (name, national_id, phone_number, purpose_of_visit, created_at) VALUES (?, ?, ?, ?, ?)";
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setString(1, name);
                 statement.setString(2, nationalId);
                 statement.setString(3, phoneNumber);
                 statement.setString(4, purposeOfVisit);
+                statement.setTimestamp(5, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
                 statement.executeUpdate();
             }
         }
 
         sendJson(exchange, 201, "{\"message\":\"Visitor registered successfully\"}");
+    }
+
+    private static void handleUpdateVisitor(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireSecurityOfficer(session);
+
+        Map<String, String> form = parseFormBody(exchange);
+        int visitorId = parseRequiredInt(form.get("visitorId"), "Visitor is required");
+        String name = trim(form.get("name"));
+        String nationalId = trim(form.get("nationalId"));
+        String phoneNumber = trim(form.get("phoneNumber"));
+        String purposeOfVisit = trim(form.get("purposeOfVisit"));
+
+        if (name.isEmpty() || nationalId.isEmpty() || phoneNumber.isEmpty() || purposeOfVisit.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"All visitor fields are required\"}");
+            return;
+        }
+
+        try (Connection connection = getConnection()) {
+            if (visitorExists(connection, nationalId, visitorId)) {
+                sendJson(exchange, 409, "{\"message\":\"Another visitor already uses that ID\"}");
+                return;
+            }
+
+            String sql = "UPDATE visitors SET name = ?, national_id = ?, phone_number = ?, purpose_of_visit = ? WHERE visitor_id = ?";
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, name);
+                statement.setString(2, nationalId);
+                statement.setString(3, phoneNumber);
+                statement.setString(4, purposeOfVisit);
+                statement.setInt(5, visitorId);
+                int updated = statement.executeUpdate();
+                if (updated == 0) {
+                    sendJson(exchange, 404, "{\"message\":\"Visitor not found\"}");
+                    return;
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"Visitor updated successfully\"}");
+    }
+
+    private static void handleDeleteVisitor(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireSecurityOfficer(session);
+
+        Map<String, String> form = parseFormBody(exchange);
+        int visitorId = parseRequiredInt(form.get("visitorId"), "Visitor is required");
+
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement("DELETE FROM visitors WHERE visitor_id = ?")) {
+            statement.setInt(1, visitorId);
+            int deleted = statement.executeUpdate();
+            if (deleted == 0) {
+                sendJson(exchange, 404, "{\"message\":\"Visitor not found\"}");
+                return;
+            }
+        } catch (SQLException exception) {
+            if (exception.getErrorCode() == 1451) {
+                sendJson(exchange, 409, "{\"message\":\"Visitor cannot be deleted because there are related access logs\"}");
+                return;
+            }
+            throw exception;
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"Visitor deleted successfully\"}");
     }
 
     private static void handleEmployeesList(HttpExchange exchange) throws IOException, SQLException {
@@ -306,6 +441,91 @@ public class SmsApplication {
         }
 
         sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
+    }
+
+    private static void handleCreateEmployee(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireAdmin(session);
+
+        Map<String, String> form = parseFormBody(exchange);
+        String name = trim(form.get("name"));
+        String department = trim(form.get("department"));
+        String phoneNumber = trim(form.get("phoneNumber"));
+
+        if (name.isEmpty() || department.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Employee name and department are required\"}");
+            return;
+        }
+
+        String sql = "INSERT INTO employees (name, department, phone_number) VALUES (?, ?, ?)";
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, name);
+            statement.setString(2, department);
+            statement.setString(3, phoneNumber);
+            statement.executeUpdate();
+        }
+
+        sendJson(exchange, 201, "{\"message\":\"Employee created successfully\"}");
+    }
+
+    private static void handleUpdateEmployee(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireAdmin(session);
+
+        Map<String, String> form = parseFormBody(exchange);
+        int employeeId = parseRequiredInt(form.get("employeeId"), "Employee is required");
+        String name = trim(form.get("name"));
+        String department = trim(form.get("department"));
+        String phoneNumber = trim(form.get("phoneNumber"));
+
+        if (name.isEmpty() || department.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Employee name and department are required\"}");
+            return;
+        }
+
+        String sql = "UPDATE employees SET name = ?, department = ?, phone_number = ? WHERE employee_id = ?";
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, name);
+            statement.setString(2, department);
+            statement.setString(3, phoneNumber);
+            statement.setInt(4, employeeId);
+            int updated = statement.executeUpdate();
+            if (updated == 0) {
+                sendJson(exchange, 404, "{\"message\":\"Employee not found\"}");
+                return;
+            }
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"Employee updated successfully\"}");
+    }
+
+    private static void handleDeleteEmployee(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireAdmin(session);
+
+        Map<String, String> form = parseFormBody(exchange);
+        int employeeId = parseRequiredInt(form.get("employeeId"), "Employee is required");
+
+        String sql = "DELETE FROM employees WHERE employee_id = ?";
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, employeeId);
+            int deleted = statement.executeUpdate();
+            if (deleted == 0) {
+                sendJson(exchange, 404, "{\"message\":\"Employee not found\"}");
+                return;
+            }
+        } catch (SQLException exception) {
+            if (exception.getErrorCode() == 1451) {
+                sendJson(exchange, 409, "{\"message\":\"Employee cannot be deleted because there are related access logs\"}");
+                return;
+            }
+            throw exception;
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"Employee deleted successfully\"}");
     }
 
     private static void handleAccessLogsList(HttpExchange exchange) throws IOException, SQLException {
@@ -395,6 +615,67 @@ public class SmsApplication {
         sendJson(exchange, 200, "{\"message\":\"Exit recorded successfully\"}");
     }
 
+    private static void handleUpdateAccessLog(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireSecurityOfficer(session);
+
+        Map<String, String> form = parseFormBody(exchange);
+        int logId = parseRequiredInt(form.get("logId"), "Access record is required");
+        int visitorId = parseRequiredInt(form.get("visitorId"), "Visitor is required");
+        int employeeId = parseRequiredInt(form.get("employeeId"), "Employee is required");
+        String visitDate = trim(form.get("visitDate"));
+        String entryTime = trim(form.get("entryTime"));
+        String exitTime = trim(form.get("exitTime"));
+
+        if (visitDate.isEmpty() || entryTime.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Visit date and entry time are required\"}");
+            return;
+        }
+
+        String sql = "UPDATE access_logs SET visitor_id = ?, employee_id = ?, visit_date = ?, entry_time = ?, exit_time = ? WHERE log_id = ?";
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, visitorId);
+            statement.setInt(2, employeeId);
+            statement.setDate(3, Date.valueOf(visitDate));
+            statement.setTime(4, Time.valueOf(normalizeTime(entryTime)));
+            if (exitTime.isEmpty()) {
+                statement.setNull(5, java.sql.Types.TIME);
+            } else {
+                statement.setTime(5, Time.valueOf(normalizeTime(exitTime)));
+            }
+            statement.setInt(6, logId);
+
+            int updated = statement.executeUpdate();
+            if (updated == 0) {
+                sendJson(exchange, 404, "{\"message\":\"Access record not found\"}");
+                return;
+            }
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"Access record updated successfully\"}");
+    }
+
+    private static void handleDeleteAccessLog(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireSecurityOfficer(session);
+
+        Map<String, String> form = parseFormBody(exchange);
+        int logId = parseRequiredInt(form.get("logId"), "Access record is required");
+
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement("DELETE FROM access_logs WHERE log_id = ?")) {
+            statement.setInt(1, logId);
+            int deleted = statement.executeUpdate();
+            if (deleted == 0) {
+                sendJson(exchange, 404, "{\"message\":\"Access record not found\"}");
+                return;
+            }
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"Access record deleted successfully\"}");
+    }
+
     private static void handleIncidentsList(HttpExchange exchange) throws IOException, SQLException {
         requireAuthenticated(exchange);
         String sql = ""
@@ -466,6 +747,49 @@ public class SmsApplication {
         sendJson(exchange, 201, "{\"message\":\"Incident report saved successfully\"}");
     }
 
+    private static void handleUpdateIncident(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        Map<String, String> form = parseFormBody(exchange);
+        int incidentId = parseRequiredInt(form.get("incidentId"), "Incident is required");
+        String title = trim(form.get("title"));
+        String incidentType = trim(form.get("incidentType"));
+        String location = trim(form.get("location"));
+        String severity = trim(form.get("severity"));
+        String status = trim(form.get("status"));
+        String actionTaken = trim(form.get("actionTaken"));
+        String description = trim(form.get("description"));
+
+        if (title.isEmpty() || incidentType.isEmpty() || location.isEmpty() || severity.isEmpty() || status.isEmpty() || description.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"All incident fields are required\"}");
+            return;
+        }
+
+        String sql = "UPDATE incidents SET title = ?, incident_type = ?, location = ?, status = ?, action_taken = ?, description = ?, severity = ? WHERE incident_id = ?";
+
+        try (Connection connection = getConnection()) {
+            requireIncidentManager(session);
+
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, title);
+                statement.setString(2, incidentType);
+                statement.setString(3, location);
+                statement.setString(4, status);
+                statement.setString(5, actionTaken);
+                statement.setString(6, description);
+                statement.setString(7, severity);
+                statement.setInt(8, incidentId);
+
+                int updated = statement.executeUpdate();
+                if (updated == 0) {
+                    sendJson(exchange, 404, "{\"message\":\"Incident not found\"}");
+                    return;
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "{\"message\":\"Incident updated successfully\"}");
+    }
+
     private static void handleUsersList(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = requireAuthenticated(exchange);
         String sql = "SELECT user_id, username, role FROM users ORDER BY user_id ASC";
@@ -512,7 +836,7 @@ public class SmsApplication {
             String sql = "INSERT INTO users (username, password, role) VALUES (?, ?, ?)";
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setString(1, username);
-                statement.setString(2, password);
+                statement.setString(2, hashPassword(password));
                 statement.setString(3, role);
                 statement.executeUpdate();
             }
@@ -552,7 +876,7 @@ public class SmsApplication {
                     statement.setString(2, role);
                     statement.setInt(3, targetUserId);
                 } else {
-                    statement.setString(2, password);
+                    statement.setString(2, hashPassword(password));
                     statement.setString(3, role);
                     statement.setInt(4, targetUserId);
                 }
@@ -649,10 +973,108 @@ public class SmsApplication {
         sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
+    private static void handleIncidentReport(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireAdmin(session);
+
+        Map<String, String> query = parseQuery(exchange.getRequestURI());
+        String startDate = trim(query.get("startDate"));
+        String endDate = trim(query.get("endDate"));
+
+        if (startDate.isEmpty() || endDate.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Select both start date and end date\"}");
+            return;
+        }
+
+        String sql = ""
+            + "SELECT i.incident_id, i.reported_at, i.title, i.incident_type, i.location, i.severity, i.status, u.username "
+            + "FROM incidents i "
+            + "JOIN users u ON i.user_id = u.user_id "
+            + "WHERE DATE(i.reported_at) BETWEEN ? AND ? "
+            + "ORDER BY i.reported_at DESC, i.incident_id DESC";
+
+        List<String> rows = new ArrayList<>();
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setDate(1, Date.valueOf(startDate));
+            statement.setDate(2, Date.valueOf(endDate));
+
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add("{"
+                        + "\"id\":" + resultSet.getInt("incident_id") + ","
+                        + "\"date\":\"" + resultSet.getTimestamp("reported_at").toLocalDateTime().toLocalDate() + "\","
+                        + "\"title\":\"" + escapeJson(resultSet.getString("title")) + "\","
+                        + "\"incidentType\":\"" + escapeJson(resultSet.getString("incident_type")) + "\","
+                        + "\"location\":\"" + escapeJson(resultSet.getString("location")) + "\","
+                        + "\"severity\":\"" + escapeJson(resultSet.getString("severity")) + "\","
+                        + "\"status\":\"" + escapeJson(resultSet.getString("status")) + "\","
+                        + "\"reportedBy\":\"" + escapeJson(resultSet.getString("username")) + "\""
+                        + "}");
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
+    }
+
+    private static void handleVisitorReport(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireAdmin(session);
+
+        Map<String, String> query = parseQuery(exchange.getRequestURI());
+        String startDate = trim(query.get("startDate"));
+        String endDate = trim(query.get("endDate"));
+
+        if (startDate.isEmpty() || endDate.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Select both start date and end date\"}");
+            return;
+        }
+
+        String sql = ""
+            + "SELECT visitor_id, name, national_id, phone_number, purpose_of_visit, created_at "
+            + "FROM visitors "
+            + "WHERE DATE(created_at) BETWEEN ? AND ? "
+            + "ORDER BY created_at DESC, visitor_id DESC";
+
+        List<String> rows = new ArrayList<>();
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setDate(1, Date.valueOf(startDate));
+            statement.setDate(2, Date.valueOf(endDate));
+
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add("{"
+                        + "\"id\":" + resultSet.getInt("visitor_id") + ","
+                        + "\"date\":\"" + resultSet.getTimestamp("created_at").toLocalDateTime().toLocalDate() + "\","
+                        + "\"name\":\"" + escapeJson(resultSet.getString("name")) + "\","
+                        + "\"nationalId\":\"" + escapeJson(resultSet.getString("national_id")) + "\","
+                        + "\"phoneNumber\":\"" + escapeJson(resultSet.getString("phone_number")) + "\","
+                        + "\"purposeOfVisit\":\"" + escapeJson(resultSet.getString("purpose_of_visit")) + "\""
+                        + "}");
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
+    }
+
     private static boolean visitorExists(Connection connection, String nationalId) throws SQLException {
         String sql = "SELECT 1 FROM visitors WHERE national_id = ? LIMIT 1";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, nationalId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private static boolean visitorExists(Connection connection, String nationalId, int excludedVisitorId) throws SQLException {
+        String sql = "SELECT 1 FROM visitors WHERE national_id = ? AND visitor_id <> ? LIMIT 1";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, nationalId);
+            statement.setInt(2, excludedVisitorId);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next();
             }
@@ -678,6 +1100,12 @@ public class SmsApplication {
     private static void requireAdmin(SessionInfo session) {
         if (!isAdminRole(session.role)) {
             throw new SecurityException("Only Admin users can perform this action");
+        }
+    }
+
+    private static void requireIncidentManager(SessionInfo session) {
+        if (!isAdminRole(session.role) && !isSecurityRole(session.role)) {
+            throw new SecurityException("Only authorized staff can update incidents");
         }
     }
 
@@ -720,19 +1148,153 @@ public class SmsApplication {
         }
     }
 
+    private static String normalizeTime(String value) {
+        String trimmedValue = trim(value);
+        if (trimmedValue.matches("^\\d{2}:\\d{2}$")) {
+            return trimmedValue + ":00";
+        }
+        return trimmedValue;
+    }
+
     private static void initializeDatabaseState() throws IOException {
-        try (Connection connection = getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "ALTER TABLE incidents "
-                     + "ADD COLUMN IF NOT EXISTS incident_type VARCHAR(50) NOT NULL DEFAULT 'Security', "
-                     + "ADD COLUMN IF NOT EXISTS location VARCHAR(150) NOT NULL DEFAULT 'Main Facility', "
-                     + "ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'Open', "
-                     + "ADD COLUMN IF NOT EXISTS action_taken TEXT NULL"
-             )) {
-            statement.executeUpdate();
+        try (Connection connection = getConnection()) {
+            ensureColumnExists(connection, "incidents", "incident_type",
+                "ALTER TABLE incidents ADD COLUMN incident_type VARCHAR(50) NOT NULL DEFAULT 'Security'");
+            ensureColumnExists(connection, "incidents", "location",
+                "ALTER TABLE incidents ADD COLUMN location VARCHAR(150) NOT NULL DEFAULT 'Main Facility'");
+            ensureColumnExists(connection, "incidents", "status",
+                "ALTER TABLE incidents ADD COLUMN status VARCHAR(30) NOT NULL DEFAULT 'Open'");
+            ensureColumnExists(connection, "incidents", "action_taken",
+                "ALTER TABLE incidents ADD COLUMN action_taken TEXT NULL");
+            ensureColumnExists(connection, "visitors", "created_at",
+                "ALTER TABLE visitors ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
+            migrateLegacyPasswords(connection);
         } catch (SQLException exception) {
             throw new IOException("Failed to initialize database state", exception);
         }
+    }
+
+    private static void ensureColumnExists(Connection connection, String tableName, String columnName, String alterSql) throws SQLException {
+        String checkSql = "SELECT 1 FROM information_schema.columns "
+            + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1";
+
+        try (PreparedStatement checkStatement = connection.prepareStatement(checkSql)) {
+            checkStatement.setString(1, tableName);
+            checkStatement.setString(2, columnName);
+
+            try (ResultSet resultSet = checkStatement.executeQuery()) {
+                if (resultSet.next()) {
+                    return;
+                }
+            }
+        }
+
+        try (PreparedStatement alterStatement = connection.prepareStatement(alterSql)) {
+            alterStatement.executeUpdate();
+        }
+    }
+
+    private static void migrateLegacyPasswords(Connection connection) throws SQLException {
+        String selectSql = "SELECT user_id, password FROM users";
+        String updateSql = "UPDATE users SET password = ? WHERE user_id = ?";
+
+        try (PreparedStatement selectStatement = connection.prepareStatement(selectSql);
+             ResultSet resultSet = selectStatement.executeQuery();
+             PreparedStatement updateStatement = connection.prepareStatement(updateSql)) {
+            while (resultSet.next()) {
+                String storedPassword = defaultString(resultSet.getString("password"), "");
+                if (isHashedPassword(storedPassword)) {
+                    continue;
+                }
+
+                updateStatement.setString(1, hashPassword(storedPassword));
+                updateStatement.setInt(2, resultSet.getInt("user_id"));
+                updateStatement.addBatch();
+            }
+
+            updateStatement.executeBatch();
+        }
+    }
+
+    private static boolean isHashedPassword(String password) {
+        return password != null && password.startsWith(PASSWORD_PREFIX);
+    }
+
+    private static boolean verifyPassword(String rawPassword, String storedPassword) {
+        if (!isHashedPassword(storedPassword)) {
+            return storedPassword.equals(rawPassword);
+        }
+
+        String[] parts = storedPassword.split("\\$");
+        if (parts.length != 4) {
+            return false;
+        }
+
+        try {
+            int iterations = Integer.parseInt(parts[1]);
+            byte[] salt = decodeBase64(parts[2]);
+            byte[] expected = decodeBase64(parts[3]);
+            byte[] actual = derivePassword(rawPassword.toCharArray(), salt, iterations, expected.length * 8);
+            return constantTimeEquals(expected, actual);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private static void upgradePlainTextPasswordIfNeeded(Connection connection, int userId, String storedPassword) throws SQLException {
+        if (isHashedPassword(storedPassword)) {
+            return;
+        }
+
+        try (PreparedStatement statement = connection.prepareStatement("UPDATE users SET password = ? WHERE user_id = ?")) {
+            statement.setString(1, hashPassword(storedPassword));
+            statement.setInt(2, userId);
+            statement.executeUpdate();
+        }
+    }
+
+    private static String hashPassword(String password) {
+        byte[] salt = new byte[16];
+        SESSION_RANDOM.nextBytes(salt);
+        byte[] hash = derivePassword(password.toCharArray(), salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH);
+        return PASSWORD_PREFIX
+            + PASSWORD_ITERATIONS + "$"
+            + encodeBase64(salt) + "$"
+            + encodeBase64(hash);
+    }
+
+    private static byte[] derivePassword(char[] password, byte[] salt, int iterations, int keyLength) {
+        PBEKeySpec spec = new PBEKeySpec(password, salt, iterations, keyLength);
+        try {
+            SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            return factory.generateSecret(spec).getEncoded();
+        } catch (InvalidKeySpecException | java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("Unable to hash password", exception);
+        } finally {
+            spec.clearPassword();
+        }
+    }
+
+    private static boolean constantTimeEquals(byte[] left, byte[] right) {
+        if (left.length != right.length) {
+            return false;
+        }
+
+        int result = 0;
+        for (int index = 0; index < left.length; index++) {
+            result |= left[index] ^ right[index];
+        }
+        return result == 0;
+    }
+
+    private static String encodeBase64(byte[] value) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
+    }
+
+    private static byte[] decodeBase64(String value) {
+        int paddingNeeded = (4 - (value.length() % 4)) % 4;
+        String padded = value + "=".repeat(paddingNeeded);
+        return Base64.getUrlDecoder().decode(padded);
     }
 
     private static void serveStaticResource(HttpExchange exchange, String path) throws IOException {

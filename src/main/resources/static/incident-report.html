@@ -12,6 +12,7 @@
         <div class="nav-links">
             <a href="dashboard.html">Dashboard</a>
             <a href="users.html">User Management</a>
+            <a href="employees.html">Employee Management</a>
             <a href="reports.html">Reports</a>
             <a href="visitor-registration.html">Register Visitor</a>
             <a href="access-control.html">Access Control</a>
@@ -21,77 +22,173 @@
     </nav>
 
     <div class="container animate-fade page-shell">
-        <div class="glass-panel form-panel">
-            <h2>Report a Security Incident</h2>
-            <p class="muted-block">Capture security events as they happen so the team can keep an accurate incident trail.</p>
+        <div class="dashboard-grid split-grid">
+            <div class="glass-panel form-panel">
+                <h2>Report a Security Incident</h2>
+                <p class="muted-block">Capture security events as they happen so the team can keep an accurate incident trail.</p>
 
-            <div id="incidentMessage" class="alert alert-success hidden"></div>
+                <div id="incidentMessage" class="alert alert-success hidden"></div>
 
-            <form class="stacked-form" id="incidentForm">
-                <div class="form-group">
-                    <label for="title">Incident Title</label>
-                    <input type="text" id="title" name="title" required placeholder="Brief description of the incident">
-                </div>
-
-                <div class="dashboard-grid">
+                <form class="stacked-form" id="incidentForm">
                     <div class="form-group">
-                        <label for="incidentType">Incident Type</label>
-                        <select id="incidentType" name="incidentType" required>
-                            <option value="">Select incident type</option>
-                            <option>Unauthorized Access</option>
-                            <option>Theft</option>
-                            <option>Vandalism</option>
-                            <option>Medical Emergency</option>
-                            <option>Safety Hazard</option>
-                            <option>Visitor Misconduct</option>
-                            <option>Other</option>
+                        <label for="title">Incident Title</label>
+                        <input type="text" id="title" name="title" required placeholder="Brief description of the incident">
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <div class="form-group">
+                            <label for="incidentType">Incident Type</label>
+                            <select id="incidentType" name="incidentType" required>
+                                <option value="">Select incident type</option>
+                                <option>Unauthorized Access</option>
+                                <option>Theft</option>
+                                <option>Vandalism</option>
+                                <option>Medical Emergency</option>
+                                <option>Safety Hazard</option>
+                                <option>Visitor Misconduct</option>
+                                <option>Other</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="location">Location</label>
+                            <input type="text" id="location" name="location" required placeholder="e.g. Main Gate, Floor 2, Server Room">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="severity">Severity</label>
+                        <select id="severity" name="severity" required>
+                            <option value="">Select severity</option>
+                            <option>Low</option>
+                            <option>Medium</option>
+                            <option>High</option>
+                            <option>Critical</option>
                         </select>
                     </div>
 
                     <div class="form-group">
-                        <label for="location">Location</label>
-                        <input type="text" id="location" name="location" required placeholder="e.g. Main Gate, Floor 2, Server Room">
+                        <label for="status">Status</label>
+                        <select id="status" name="status" required>
+                            <option value="">Select status</option>
+                            <option>Open</option>
+                            <option>Under Investigation</option>
+                            <option>Resolved</option>
+                            <option>Escalated</option>
+                        </select>
                     </div>
-                </div>
 
-                <div class="form-group">
-                    <label for="severity">Severity</label>
-                    <select id="severity" name="severity" required>
-                        <option value="">Select severity</option>
-                        <option>Low</option>
-                        <option>Medium</option>
-                        <option>High</option>
-                        <option>Critical</option>
-                    </select>
-                </div>
+                    <div class="form-group">
+                        <label for="description">Detailed Description</label>
+                        <textarea id="description" name="description" rows="6" required placeholder="Provide a detailed account of what occurred"></textarea>
+                    </div>
 
-                <div class="form-group">
-                    <label for="status">Status</label>
-                    <select id="status" name="status" required>
-                        <option value="">Select status</option>
-                        <option>Open</option>
-                        <option>Under Investigation</option>
-                        <option>Resolved</option>
-                        <option>Escalated</option>
-                    </select>
-                </div>
+                    <div class="form-group">
+                        <label for="actionTaken">Action Taken</label>
+                        <textarea id="actionTaken" name="actionTaken" rows="4" placeholder="Describe the immediate action taken by the security team"></textarea>
+                    </div>
 
-                <div class="form-group">
-                    <label for="description">Detailed Description</label>
-                    <textarea id="description" name="description" rows="6" required placeholder="Provide a detailed account of what occurred"></textarea>
-                </div>
+                    <button type="submit" class="btn btn-primary full-width">Submit Incident Report</button>
+                </form>
+            </div>
 
-                <div class="form-group">
-                    <label for="actionTaken">Action Taken</label>
-                    <textarea id="actionTaken" name="actionTaken" rows="4" placeholder="Describe the immediate action taken by the security team"></textarea>
-                </div>
+            <div class="glass-panel form-panel">
+                <h2>Edit Incident</h2>
+                <p class="muted-block">Select an incident from the log below to update its status, action taken, or other details.</p>
 
-                <button type="submit" class="btn btn-primary full-width">Submit Incident Report</button>
-            </form>
+                <form class="stacked-form" id="incidentEditForm">
+                    <input type="hidden" id="editIncidentId">
+
+                    <div class="form-group">
+                        <label for="editTitle">Incident Title</label>
+                        <input type="text" id="editTitle" required placeholder="Choose an incident from the log">
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <div class="form-group">
+                            <label for="editIncidentType">Incident Type</label>
+                            <select id="editIncidentType" required>
+                                <option value="">Select incident type</option>
+                                <option>Unauthorized Access</option>
+                                <option>Theft</option>
+                                <option>Vandalism</option>
+                                <option>Medical Emergency</option>
+                                <option>Safety Hazard</option>
+                                <option>Visitor Misconduct</option>
+                                <option>Other</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="editLocation">Location</label>
+                            <input type="text" id="editLocation" required placeholder="Enter location">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editSeverity">Severity</label>
+                        <select id="editSeverity" required>
+                            <option value="">Select severity</option>
+                            <option>Low</option>
+                            <option>Medium</option>
+                            <option>High</option>
+                            <option>Critical</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editStatus">Status</label>
+                        <select id="editStatus" required>
+                            <option value="">Select status</option>
+                            <option>Open</option>
+                            <option>Under Investigation</option>
+                            <option>Resolved</option>
+                            <option>Escalated</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editDescription">Detailed Description</label>
+                        <textarea id="editDescription" rows="6" required placeholder="Update the incident description"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editActionTaken">Action Taken</label>
+                        <textarea id="editActionTaken" rows="4" placeholder="Update the response taken"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-secondary full-width">Save Incident Changes</button>
+                </form>
+            </div>
         </div>
 
         <div class="glass-panel top-gap">
             <h3>Incident Log</h3>
+            <form class="stacked-form top-gap" id="incidentFilterForm">
+                <div class="dashboard-grid">
+                    <div class="form-group">
+                        <label for="incidentFilterStatus">Filter by Status</label>
+                        <select id="incidentFilterStatus">
+                            <option value="">All statuses</option>
+                            <option>Open</option>
+                            <option>Under Investigation</option>
+                            <option>Resolved</option>
+                            <option>Escalated</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="incidentFilterDate">Filter by Date</label>
+                        <input type="date" id="incidentFilterDate">
+                    </div>
+                </div>
+
+                <div class="inline-actions">
+                    <button type="submit" class="btn btn-secondary">Apply Filters</button>
+                    <button type="button" class="btn btn-danger" id="resetIncidentFilters">Reset Filters</button>
+                </div>
+            </form>
+
             <table>
                 <thead>
                     <tr>
@@ -104,6 +201,7 @@
                         <th>Reported By</th>
                         <th>Action Taken</th>
                         <th>Description</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="incidentTable"></tbody>
