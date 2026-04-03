@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: sms-security-system
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: SMS_DB_URL
+        sync: false
+      - key: SMS_DB_USER
+        sync: false
+      - key: SMS_DB_PASSWORD
+        sync: false
