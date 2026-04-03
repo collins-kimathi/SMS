@@ -875,6 +875,21 @@ public class SmsApplication {
                 return;
             }
 
+            String currentUsername = null;
+            String currentRole = null;
+            try (PreparedStatement currentStatement = connection.prepareStatement(
+                "SELECT username, role FROM users WHERE user_id = ?")) {
+                currentStatement.setInt(1, targetUserId);
+                try (ResultSet resultSet = currentStatement.executeQuery()) {
+                    if (!resultSet.next()) {
+                        sendJson(exchange, 404, "{\"message\":\"User not found\"}");
+                        return;
+                    }
+                    currentUsername = defaultString(resultSet.getString("username"), "");
+                    currentRole = defaultString(resultSet.getString("role"), "");
+                }
+            }
+
             String sql = password.isEmpty()
                 ? "UPDATE users SET username = ?, role = ? WHERE user_id = ?"
                 : "UPDATE users SET username = ?, password = ?, role = ? WHERE user_id = ?";
@@ -896,10 +911,22 @@ public class SmsApplication {
                     return;
                 }
             }
-            recordAuditAction(connection, session.userId, "UPDATE", "user", String.valueOf(targetUserId), "Updated user " + username);
-        }
 
-        sendJson(exchange, 200, "{\"message\":\"User updated successfully\"}");
+            boolean revokeSessions = !password.isEmpty()
+                || !currentUsername.equals(username)
+                || !currentRole.equals(role);
+            if (revokeSessions) {
+                deleteSessionsForUser(connection, targetUserId);
+            }
+            recordAuditAction(connection, session.userId, "UPDATE", "user", String.valueOf(targetUserId), "Updated user " + username);
+
+            sendJson(exchange, 200, "{"
+                + "\"message\":\"User updated successfully\","
+                + "\"sessionRevoked\":" + (revokeSessions ? "true" : "false") + ","
+                + "\"updatedCurrentUser\":" + (targetUserId == session.userId ? "true" : "false")
+                + "}");
+            return;
+        }
     }
 
     private static void handleDeleteUser(HttpExchange exchange) throws IOException, SQLException {
@@ -1687,6 +1714,13 @@ public class SmsApplication {
     private static void deleteSession(Connection connection, String sessionId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("DELETE FROM sessions WHERE session_id = ?")) {
             statement.setString(1, sessionId);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void deleteSessionsForUser(Connection connection, int userId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("DELETE FROM sessions WHERE user_id = ?")) {
+            statement.setInt(1, userId);
             statement.executeUpdate();
         }
     }
