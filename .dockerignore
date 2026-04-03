@@ -1,8 +1,0 @@
-.git
-.gitignore
-.env
-.env.*
-out
-target
-.vscode
-README-plain-java.md

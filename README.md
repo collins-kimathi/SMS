@@ -144,60 +144,6 @@ The script:
 - copies static resources
 - starts the server
 
-## Deploy to Render
-
-This repo is ready to deploy to Render with Docker.
-
-### 1. Push the repository to GitHub
-
-```bash
-git add .
-git commit -m "Prepare app for Render deployment"
-git push origin main
-```
-
-### 2. Create the Render web service
-
-1. Sign in to Render.
-2. Create a new `Web Service`.
-3. Connect your GitHub repository.
-4. Render will detect the included [render.yaml](render.yaml) and [Dockerfile](Dockerfile).
-5. Create the service.
-
-### 3. Set the required environment variables in Render
-
-Add these values in the Render dashboard:
-
-- `SMS_DB_URL`
-- `SMS_DB_USER`
-- `SMS_DB_PASSWORD`
-
-Render already gets `PORT=10000` from [render.yaml](render.yaml).
-
-Example:
-
-```text
-SMS_DB_URL=jdbc:mysql://your-mysql-host:3306/sms_db?serverTimezone=UTC
-SMS_DB_USER=your_db_user
-SMS_DB_PASSWORD=your_db_password
-```
-
-### 4. Use a production MySQL database
-
-Render will run the Java app, but you still need a MySQL database that Render can reach.
-
-You can use:
-
-- your own hosted MySQL server
-- a cloud MySQL provider
-- a VPS-hosted MySQL server
-
-Before the first deploy, run [database/schema.sql](database/schema.sql) against that database so the tables exist.
-
-### 5. Open the deployed app
-
-After the deploy finishes, open the Render service URL and sign in with the seeded accounts from the database schema.
-
 ## Role access
 
 ### Admin
@@ -263,7 +209,6 @@ SELECT * FROM audit_logs;
 - Reports can be exported as CSV.
 - Passwords are stored hashed, not in plain text.
 - Database credentials are read from environment variables only.
-- Render deployment uses Docker, so the JDBC driver is bundled in the image automatically.
 
 ## Additional guide
 
