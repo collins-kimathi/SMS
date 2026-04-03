@@ -265,8 +265,7 @@ public class SmsApplication {
                     resultSet.getString("username"),
                     defaultString(resultSet.getString("role"), "Security")
                 );
-                recordAuditAction(connection, session.userId, "LOGIN", "session", session.sessionId,
-                    "User signed in");
+                recordAuditAction(connection, session.userId, "LOGIN", "session", session.sessionId, "User signed in");
                 setSessionCookie(exchange, session.sessionId);
 
                 String response = "{"
@@ -289,8 +288,7 @@ public class SmsApplication {
         if (session != null) {
             try (Connection connection = getConnection()) {
                 deleteSession(connection, session.sessionId);
-                recordAuditAction(connection, session.userId, "LOGOUT", "session", session.sessionId,
-                    "User signed out");
+                recordAuditAction(connection, session.userId, "LOGOUT", "session", session.sessionId, "User signed out");
             } catch (SQLException exception) {
                 throw new IOException("Failed to end session", exception);
             }
@@ -342,15 +340,15 @@ public class SmsApplication {
                 return;
             }
 
-            String sql = "INSERT INTO visitors (name, national_id, phone_number, purpose_of_visit, created_at) VALUES (?, ?, ?, ?, ?)";
+            String sql = "INSERT INTO visitors (name, national_id, phone_number, purpose_of_visit) VALUES (?, ?, ?, ?)";
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setString(1, name);
                 statement.setString(2, nationalId);
                 statement.setString(3, phoneNumber);
                 statement.setString(4, purposeOfVisit);
-                statement.setTimestamp(5, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
                 statement.executeUpdate();
             }
+            recordAuditAction(connection, session.userId, "CREATE", "visitor", nationalId, "Registered visitor " + name);
         }
 
         sendJson(exchange, 201, "{\"message\":\"Visitor registered successfully\"}");
@@ -391,6 +389,7 @@ public class SmsApplication {
                     return;
                 }
             }
+            recordAuditAction(connection, session.userId, "UPDATE", "visitor", String.valueOf(visitorId), "Updated visitor " + name);
         }
 
         sendJson(exchange, 200, "{\"message\":\"Visitor updated successfully\"}");
@@ -411,6 +410,7 @@ public class SmsApplication {
                 sendJson(exchange, 404, "{\"message\":\"Visitor not found\"}");
                 return;
             }
+            recordAuditAction(connection, session.userId, "DELETE", "visitor", String.valueOf(visitorId), "Deleted visitor record");
         } catch (SQLException exception) {
             if (exception.getErrorCode() == 1451) {
                 sendJson(exchange, 409, "{\"message\":\"Visitor cannot be deleted because there are related access logs\"}");
@@ -464,6 +464,7 @@ public class SmsApplication {
             statement.setString(2, department);
             statement.setString(3, phoneNumber);
             statement.executeUpdate();
+            recordAuditAction(connection, session.userId, "CREATE", "employee", name, "Created employee " + name);
         }
 
         sendJson(exchange, 201, "{\"message\":\"Employee created successfully\"}");
@@ -496,6 +497,7 @@ public class SmsApplication {
                 sendJson(exchange, 404, "{\"message\":\"Employee not found\"}");
                 return;
             }
+            recordAuditAction(connection, session.userId, "UPDATE", "employee", String.valueOf(employeeId), "Updated employee " + name);
         }
 
         sendJson(exchange, 200, "{\"message\":\"Employee updated successfully\"}");
@@ -517,6 +519,7 @@ public class SmsApplication {
                 sendJson(exchange, 404, "{\"message\":\"Employee not found\"}");
                 return;
             }
+            recordAuditAction(connection, session.userId, "DELETE", "employee", String.valueOf(employeeId), "Deleted employee record");
         } catch (SQLException exception) {
             if (exception.getErrorCode() == 1451) {
                 sendJson(exchange, 409, "{\"message\":\"Employee cannot be deleted because there are related access logs\"}");
@@ -586,6 +589,7 @@ public class SmsApplication {
                 statement.setTime(5, Time.valueOf(LocalTime.now().withSecond(0).withNano(0)));
                 statement.executeUpdate();
             }
+            recordAuditAction(connection, session.userId, "CREATE", "access_log", String.valueOf(visitorId), "Recorded visitor entry");
         }
 
         sendJson(exchange, 201, "{\"message\":\"Entry recorded successfully\"}");
@@ -610,6 +614,7 @@ public class SmsApplication {
                     return;
                 }
             }
+            recordAuditAction(connection, session.userId, "UPDATE", "access_log", String.valueOf(visitorId), "Recorded visitor exit");
         }
 
         sendJson(exchange, 200, "{\"message\":\"Exit recorded successfully\"}");
@@ -645,12 +650,12 @@ public class SmsApplication {
                 statement.setTime(5, Time.valueOf(normalizeTime(exitTime)));
             }
             statement.setInt(6, logId);
-
             int updated = statement.executeUpdate();
             if (updated == 0) {
                 sendJson(exchange, 404, "{\"message\":\"Access record not found\"}");
                 return;
             }
+            recordAuditAction(connection, session.userId, "UPDATE", "access_log", String.valueOf(logId), "Updated access record");
         }
 
         sendJson(exchange, 200, "{\"message\":\"Access record updated successfully\"}");
@@ -671,6 +676,7 @@ public class SmsApplication {
                 sendJson(exchange, 404, "{\"message\":\"Access record not found\"}");
                 return;
             }
+            recordAuditAction(connection, session.userId, "DELETE", "access_log", String.valueOf(logId), "Deleted access record");
         }
 
         sendJson(exchange, 200, "{\"message\":\"Access record deleted successfully\"}");
@@ -742,6 +748,7 @@ public class SmsApplication {
                 statement.setTimestamp(9, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
                 statement.executeUpdate();
             }
+            recordAuditAction(connection, session.userId, "CREATE", "incident", title, "Created incident " + title);
         }
 
         sendJson(exchange, 201, "{\"message\":\"Incident report saved successfully\"}");
@@ -785,6 +792,7 @@ public class SmsApplication {
                     return;
                 }
             }
+            recordAuditAction(connection, session.userId, "UPDATE", "incident", String.valueOf(incidentId), "Updated incident " + title);
         }
 
         sendJson(exchange, 200, "{\"message\":\"Incident updated successfully\"}");
@@ -840,6 +848,7 @@ public class SmsApplication {
                 statement.setString(3, role);
                 statement.executeUpdate();
             }
+            recordAuditAction(connection, session.userId, "CREATE", "user", username, "Created user " + username);
         }
 
         sendJson(exchange, 201, "{\"message\":\"User created successfully\"}");
@@ -887,6 +896,7 @@ public class SmsApplication {
                     return;
                 }
             }
+            recordAuditAction(connection, session.userId, "UPDATE", "user", String.valueOf(targetUserId), "Updated user " + username);
         }
 
         sendJson(exchange, 200, "{\"message\":\"User updated successfully\"}");
@@ -913,6 +923,7 @@ public class SmsApplication {
                     sendJson(exchange, 404, "{\"message\":\"User not found\"}");
                     return;
                 }
+                recordAuditAction(connection, session.userId, "DELETE", "user", String.valueOf(targetUserId), "Deleted user account");
             } catch (SQLException exception) {
                 if (exception.getErrorCode() == 1451) {
                     sendJson(exchange, 409, "{\"message\":\"User cannot be deleted because there are related records\"}");
@@ -1060,6 +1071,74 @@ public class SmsApplication {
         sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
+    private static void handleAuditReport(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireAdmin(session);
+
+        Map<String, String> query = parseQuery(exchange.getRequestURI());
+        String startDate = trim(query.get("startDate"));
+        String endDate = trim(query.get("endDate"));
+
+        if (startDate.isEmpty() || endDate.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Select both start date and end date\"}");
+            return;
+        }
+
+        String sql = ""
+            + "SELECT audit_id, action_type, entity_type, entity_id, details, created_at, username "
+            + "FROM audit_logs "
+            + "WHERE DATE(created_at) BETWEEN ? AND ? "
+            + "ORDER BY created_at DESC, audit_id DESC";
+
+        List<String> rows = new ArrayList<>();
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setDate(1, Date.valueOf(startDate));
+            statement.setDate(2, Date.valueOf(endDate));
+
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add("{"
+                        + "\"id\":" + resultSet.getInt("audit_id") + ","
+                        + "\"date\":\"" + resultSet.getTimestamp("created_at").toLocalDateTime().toLocalDate() + "\","
+                        + "\"actionType\":\"" + escapeJson(resultSet.getString("action_type")) + "\","
+                        + "\"entityType\":\"" + escapeJson(resultSet.getString("entity_type")) + "\","
+                        + "\"entityId\":\"" + escapeJson(defaultString(resultSet.getString("entity_id"), "")) + "\","
+                        + "\"details\":\"" + escapeJson(defaultString(resultSet.getString("details"), "")) + "\","
+                        + "\"username\":\"" + escapeJson(defaultString(resultSet.getString("username"), "System")) + "\""
+                        + "}");
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
+    }
+
+    private static void handleExportReport(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireAdmin(session);
+
+        Map<String, String> query = parseQuery(exchange.getRequestURI());
+        String type = trim(query.get("type"));
+        String startDate = trim(query.get("startDate"));
+        String endDate = trim(query.get("endDate"));
+
+        if (type.isEmpty() || startDate.isEmpty() || endDate.isEmpty()) {
+            sendText(exchange, 400, "Missing export parameters");
+            return;
+        }
+
+        String csv = buildCsvReport(type, startDate, endDate);
+        byte[] payload = csv.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/csv; charset=UTF-8");
+        exchange.getResponseHeaders().set("Content-Disposition",
+            "attachment; filename=\"" + type + "-report-" + startDate + "-to-" + endDate + ".csv\"");
+        exchange.sendResponseHeaders(200, payload.length);
+        try (OutputStream outputStream = exchange.getResponseBody()) {
+            outputStream.write(payload);
+        }
+    }
+
     private static boolean visitorExists(Connection connection, String nationalId) throws SQLException {
         String sql = "SELECT 1 FROM visitors WHERE national_id = ? LIMIT 1";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -1087,6 +1166,34 @@ public class SmsApplication {
             statement.setInt(1, visitorId);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next();
+            }
+        }
+    }
+
+    private static void recordAuditAction(Connection connection, Integer userId, String actionType, String entityType, String entityId, String details) throws SQLException {
+        String sql = "INSERT INTO audit_logs (user_id, username, action_type, entity_type, entity_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            if (userId == null) {
+                statement.setNull(1, java.sql.Types.INTEGER);
+                statement.setString(2, "System");
+            } else {
+                statement.setInt(1, userId);
+                statement.setString(2, resolveUsername(connection, userId));
+            }
+            statement.setString(3, actionType);
+            statement.setString(4, entityType);
+            statement.setString(5, entityId);
+            statement.setString(6, details);
+            statement.setTimestamp(7, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
+            statement.executeUpdate();
+        }
+    }
+
+    private static String resolveUsername(Connection connection, int userId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT username FROM users WHERE user_id = ?")) {
+            statement.setInt(1, userId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getString("username") : "Unknown";
             }
         }
     }
@@ -1168,9 +1275,33 @@ public class SmsApplication {
                 "ALTER TABLE incidents ADD COLUMN action_taken TEXT NULL");
             ensureColumnExists(connection, "visitors", "created_at",
                 "ALTER TABLE visitors ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
+            ensureTableExists(connection, "CREATE TABLE IF NOT EXISTS sessions ("
+                + "session_id VARCHAR(128) PRIMARY KEY,"
+                + "user_id INT NOT NULL,"
+                + "username VARCHAR(50) NOT NULL,"
+                + "role VARCHAR(20) NOT NULL,"
+                + "expires_at DATETIME NOT NULL,"
+                + "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)");
+            ensureTableExists(connection, "CREATE TABLE IF NOT EXISTS audit_logs ("
+                + "audit_id INT AUTO_INCREMENT PRIMARY KEY,"
+                + "user_id INT NULL,"
+                + "username VARCHAR(50) NOT NULL,"
+                + "action_type VARCHAR(30) NOT NULL,"
+                + "entity_type VARCHAR(50) NOT NULL,"
+                + "entity_id VARCHAR(100) NULL,"
+                + "details TEXT NOT NULL,"
+                + "created_at DATETIME NOT NULL,"
+                + "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL)");
+            cleanupExpiredSessions(connection);
             migrateLegacyPasswords(connection);
         } catch (SQLException exception) {
             throw new IOException("Failed to initialize database state", exception);
+        }
+    }
+
+    private static void ensureTableExists(Connection connection, String createSql) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(createSql)) {
+            statement.executeUpdate();
         }
     }
 
@@ -1191,6 +1322,13 @@ public class SmsApplication {
 
         try (PreparedStatement alterStatement = connection.prepareStatement(alterSql)) {
             alterStatement.executeUpdate();
+        }
+    }
+
+    private static void cleanupExpiredSessions(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("DELETE FROM sessions WHERE expires_at < ?")) {
+            statement.setTimestamp(1, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
+            statement.executeUpdate();
         }
     }
 
@@ -1257,10 +1395,7 @@ public class SmsApplication {
         byte[] salt = new byte[16];
         SESSION_RANDOM.nextBytes(salt);
         byte[] hash = derivePassword(password.toCharArray(), salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH);
-        return PASSWORD_PREFIX
-            + PASSWORD_ITERATIONS + "$"
-            + encodeBase64(salt) + "$"
-            + encodeBase64(hash);
+        return PASSWORD_PREFIX + PASSWORD_ITERATIONS + "$" + encodeBase64(salt) + "$" + encodeBase64(hash);
     }
 
     private static byte[] derivePassword(char[] password, byte[] salt, int iterations, int keyLength) {
@@ -1293,8 +1428,121 @@ public class SmsApplication {
 
     private static byte[] decodeBase64(String value) {
         int paddingNeeded = (4 - (value.length() % 4)) % 4;
-        String padded = value + "=".repeat(paddingNeeded);
-        return Base64.getUrlDecoder().decode(padded);
+        return Base64.getUrlDecoder().decode(value + "=".repeat(paddingNeeded));
+    }
+
+    private static String buildCsvReport(String type, String startDate, String endDate) throws SQLException {
+        Map<String, String> query = new LinkedHashMap<>();
+        query.put("startDate", startDate);
+        query.put("endDate", endDate);
+
+        List<String[]> rows = new ArrayList<>();
+        if ("access".equals(type)) {
+            rows.add(new String[] {"Date", "Visitor", "Host", "Entry", "Exit", "Recorded By"});
+            String sql = ""
+                + "SELECT al.visit_date, v.name AS visitor_name, e.name AS employee_name, e.department, u.username, al.entry_time, al.exit_time "
+                + "FROM access_logs al "
+                + "JOIN visitors v ON al.visitor_id = v.visitor_id "
+                + "JOIN employees e ON al.employee_id = e.employee_id "
+                + "JOIN users u ON al.user_id = u.user_id "
+                + "WHERE al.visit_date BETWEEN ? AND ? ORDER BY al.visit_date DESC, al.log_id DESC";
+            try (Connection connection = getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setDate(1, Date.valueOf(startDate));
+                statement.setDate(2, Date.valueOf(endDate));
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    while (resultSet.next()) {
+                        rows.add(new String[] {
+                            String.valueOf(resultSet.getDate("visit_date")),
+                            resultSet.getString("visitor_name"),
+                            resultSet.getString("employee_name") + " (" + resultSet.getString("department") + ")",
+                            String.valueOf(resultSet.getTime("entry_time")),
+                            resultSet.getTime("exit_time") == null ? "" : String.valueOf(resultSet.getTime("exit_time")),
+                            resultSet.getString("username")
+                        });
+                    }
+                }
+            }
+        } else if ("incidents".equals(type)) {
+            rows.add(new String[] {"Date", "Title", "Type", "Location", "Severity", "Status", "Reported By"});
+            String sql = ""
+                + "SELECT DATE(reported_at) AS report_date, title, incident_type, location, severity, status, username "
+                + "FROM incidents i JOIN users u ON i.user_id = u.user_id "
+                + "WHERE DATE(reported_at) BETWEEN ? AND ? ORDER BY reported_at DESC, incident_id DESC";
+            try (Connection connection = getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setDate(1, Date.valueOf(startDate));
+                statement.setDate(2, Date.valueOf(endDate));
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    while (resultSet.next()) {
+                        rows.add(new String[] {
+                            String.valueOf(resultSet.getDate("report_date")),
+                            resultSet.getString("title"),
+                            resultSet.getString("incident_type"),
+                            resultSet.getString("location"),
+                            resultSet.getString("severity"),
+                            resultSet.getString("status"),
+                            resultSet.getString("username")
+                        });
+                    }
+                }
+            }
+        } else if ("visitors".equals(type)) {
+            rows.add(new String[] {"Date", "Visitor", "ID / Passport", "Phone", "Purpose"});
+            String sql = "SELECT DATE(created_at) AS created_date, name, national_id, phone_number, purpose_of_visit "
+                + "FROM visitors WHERE DATE(created_at) BETWEEN ? AND ? ORDER BY created_at DESC, visitor_id DESC";
+            try (Connection connection = getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setDate(1, Date.valueOf(startDate));
+                statement.setDate(2, Date.valueOf(endDate));
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    while (resultSet.next()) {
+                        rows.add(new String[] {
+                            String.valueOf(resultSet.getDate("created_date")),
+                            resultSet.getString("name"),
+                            resultSet.getString("national_id"),
+                            resultSet.getString("phone_number"),
+                            resultSet.getString("purpose_of_visit")
+                        });
+                    }
+                }
+            }
+        } else if ("audit".equals(type)) {
+            rows.add(new String[] {"Date", "Action", "Entity", "Entity ID", "User", "Details"});
+            String sql = "SELECT DATE(created_at) AS created_date, action_type, entity_type, entity_id, username, details "
+                + "FROM audit_logs WHERE DATE(created_at) BETWEEN ? AND ? ORDER BY created_at DESC, audit_id DESC";
+            try (Connection connection = getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setDate(1, Date.valueOf(startDate));
+                statement.setDate(2, Date.valueOf(endDate));
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    while (resultSet.next()) {
+                        rows.add(new String[] {
+                            String.valueOf(resultSet.getDate("created_date")),
+                            resultSet.getString("action_type"),
+                            resultSet.getString("entity_type"),
+                            defaultString(resultSet.getString("entity_id"), ""),
+                            resultSet.getString("username"),
+                            resultSet.getString("details")
+                        });
+                    }
+                }
+            }
+        } else {
+            throw new IllegalArgumentException("Unsupported report type");
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (String[] row : rows) {
+            for (int index = 0; index < row.length; index++) {
+                if (index > 0) {
+                    builder.append(',');
+                }
+                builder.append('"').append(defaultString(row[index], "").replace("\"", "\"\"")).append('"');
+            }
+            builder.append('\n');
+        }
+        return builder.toString();
     }
 
     private static void serveStaticResource(HttpExchange exchange, String path) throws IOException {
@@ -1393,24 +1641,54 @@ public class SmsApplication {
             return null;
         }
 
-        SessionInfo session = SESSIONS.get(sessionId);
-        if (session == null) {
-            return null;
-        }
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT session_id, user_id, username, role, expires_at FROM sessions WHERE session_id = ?")) {
+            statement.setString(1, sessionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return null;
+                }
 
-        if (session.expiresAtMillis < System.currentTimeMillis()) {
-            SESSIONS.remove(sessionId);
-            return null;
-        }
+                Timestamp expiresAt = resultSet.getTimestamp("expires_at");
+                if (expiresAt == null || expiresAt.getTime() < System.currentTimeMillis()) {
+                    deleteSession(connection, sessionId);
+                    return null;
+                }
 
+                return new SessionInfo(
+                    resultSet.getString("session_id"),
+                    resultSet.getInt("user_id"),
+                    resultSet.getString("username"),
+                    resultSet.getString("role"),
+                    expiresAt.getTime()
+                );
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load session", exception);
+        }
+    }
+
+    private static SessionInfo createSession(Connection connection, int userId, String username, String role) throws SQLException {
+        String sessionId = generateSessionId();
+        SessionInfo session = new SessionInfo(sessionId, userId, username, role, System.currentTimeMillis() + SESSION_TTL_MILLIS);
+        try (PreparedStatement statement = connection.prepareStatement(
+            "INSERT INTO sessions (session_id, user_id, username, role, expires_at) VALUES (?, ?, ?, ?, ?)")) {
+            statement.setString(1, sessionId);
+            statement.setInt(2, userId);
+            statement.setString(3, username);
+            statement.setString(4, role);
+            statement.setTimestamp(5, new Timestamp(session.expiresAtMillis));
+            statement.executeUpdate();
+        }
         return session;
     }
 
-    private static SessionInfo createSession(int userId, String username, String role) {
-        String sessionId = generateSessionId();
-        SessionInfo session = new SessionInfo(sessionId, userId, username, role, System.currentTimeMillis() + SESSION_TTL_MILLIS);
-        SESSIONS.put(sessionId, session);
-        return session;
+    private static void deleteSession(Connection connection, String sessionId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("DELETE FROM sessions WHERE session_id = ?")) {
+            statement.setString(1, sessionId);
+            statement.executeUpdate();
+        }
     }
 
     private static String generateSessionId() {

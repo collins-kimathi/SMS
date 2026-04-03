@@ -183,6 +183,10 @@ async function loadVisitorReport(startDate, endDate) {
     return api(`/api/reports/visitors?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
 
+async function loadAuditReport(startDate, endDate) {
+    return api(`/api/reports/audit?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+}
+
 async function renderVisitorTable() {
     const table = document.getElementById("visitorTable");
     if (!table) {
@@ -493,7 +497,8 @@ function renderReportsHeader(type) {
     const headings = {
         access: ["Date", "Visitor", "Host", "Entry", "Exit", "Recorded By"],
         incidents: ["Date", "Title", "Type", "Location", "Severity", "Status", "Reported By"],
-        visitors: ["Date", "Visitor", "ID / Passport", "Phone", "Purpose"]
+        visitors: ["Date", "Visitor", "ID / Passport", "Phone", "Purpose"],
+        audit: ["Date", "Action", "Entity", "Entity ID", "User", "Details"]
     };
 
     head.innerHTML = `<tr>${(headings[type] || headings.access).map((label) => `<th>${label}</th>`).join("")}</tr>`;
@@ -537,10 +542,20 @@ async function renderReportsTable(rows = [], type = "access") {
                 <td>${visitor.phoneNumber}</td>
                 <td>${visitor.purposeOfVisit}</td>
             </tr>
+        `,
+        audit: (entry) => `
+            <tr>
+                <td>${entry.date}</td>
+                <td>${entry.actionType}</td>
+                <td>${entry.entityType}</td>
+                <td>${entry.entityId || "-"}</td>
+                <td>${entry.username}</td>
+                <td>${entry.details}</td>
+            </tr>
         `
     };
 
-    const colspans = { access: 6, incidents: 7, visitors: 5 };
+    const colspans = { access: 6, incidents: 7, visitors: 5, audit: 6 };
 
     table.innerHTML = rows.length
         ? rows.map(renderers[type] || renderers.access).join("")
@@ -1173,6 +1188,7 @@ function bindEmployeeForms() {
 
 function bindReportForm() {
     const form = document.getElementById("reportForm");
+    const exportButton = document.getElementById("exportReport");
     if (!form) {
         return;
     }
@@ -1197,7 +1213,8 @@ function bindReportForm() {
             const loaders = {
                 access: loadAccessReport,
                 incidents: loadIncidentReport,
-                visitors: loadVisitorReport
+                visitors: loadVisitorReport,
+                audit: loadAuditReport
             };
             const rows = await (loaders[reportType] || loadAccessReport)(startDate, endDate);
             await renderReportsTable(rows, reportType);
@@ -1206,6 +1223,26 @@ function bindReportForm() {
             message("reportMessage", error.message, true);
         }
     });
+
+    if (exportButton) {
+        exportButton.addEventListener("click", () => {
+            const reportType = document.getElementById("reportType").value;
+            const startDate = document.getElementById("reportStartDate").value;
+            const endDate = document.getElementById("reportEndDate").value;
+
+            if (!startDate || !endDate) {
+                message("reportMessage", "Select both start date and end date before exporting.", true);
+                return;
+            }
+
+            if (startDate > endDate) {
+                message("reportMessage", "Start date cannot be after end date.", true);
+                return;
+            }
+
+            window.location.href = `/api/reports/export?type=${encodeURIComponent(reportType)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+        });
+    }
 }
 
 async function initializePage(page) {

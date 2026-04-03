@@ -175,6 +175,18 @@ async function loadAccessReport(startDate, endDate) {
     return api(`/api/reports/access?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
 
+async function loadIncidentReport(startDate, endDate) {
+    return api(`/api/reports/incidents?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+}
+
+async function loadVisitorReport(startDate, endDate) {
+    return api(`/api/reports/visitors?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+}
+
+async function loadAuditReport(startDate, endDate) {
+    return api(`/api/reports/audit?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+}
+
 async function renderVisitorTable() {
     const table = document.getElementById("visitorTable");
     if (!table) {
@@ -189,10 +201,17 @@ async function renderVisitorTable() {
                 <td>${visitor.nationalId}</td>
                 <td>${visitor.phoneNumber}</td>
                 <td>${visitor.purposeOfVisit}</td>
+                <td>
+                    <div class="inline-actions">
+                        <button type="button" class="btn btn-secondary btn-small" data-edit-visitor="${visitor.id}">Edit</button>
+                        <button type="button" class="btn btn-danger btn-small" data-delete-visitor="${visitor.id}">Delete</button>
+                    </div>
+                </td>
             </tr>
         `).join("")
-        : tableEmptyRow(4, "No visitors registered yet.");
+        : tableEmptyRow(5, "No visitors registered yet.");
 
+    bindVisitorRowActions(visitors);
     return visitors;
 }
 
@@ -200,6 +219,8 @@ async function renderAccessSelects() {
     const entrySelect = document.getElementById("visitorId");
     const exitSelect = document.getElementById("exitVisitorId");
     const employeeSelect = document.getElementById("employeeId");
+    const editVisitorSelect = document.getElementById("editVisitorId");
+    const editEmployeeSelect = document.getElementById("editEmployeeId");
     const [visitors, employees, logs] = await Promise.all([
         loadVisitors(),
         loadEmployees(),
@@ -220,6 +241,20 @@ async function renderAccessSelects() {
         `;
     }
 
+    if (editVisitorSelect) {
+        editVisitorSelect.innerHTML = `
+            <option value="">Select visitor record</option>
+            ${visitors.map((visitor) => `<option value="${visitor.id}">${visitor.name} (${visitor.nationalId})</option>`).join("")}
+        `;
+    }
+
+    if (editEmployeeSelect) {
+        editEmployeeSelect.innerHTML = `
+            <option value="">Select host employee</option>
+            ${employees.map((employee) => `<option value="${employee.id}">${employee.name} (${employee.department})</option>`).join("")}
+        `;
+    }
+
     if (exitSelect) {
         const activeIds = new Set(logs.filter((log) => !log.exitTime).map((log) => String(log.visitorId)));
         const activeVisitors = visitors.filter((visitor) => activeIds.has(String(visitor.id)));
@@ -232,7 +267,7 @@ async function renderAccessSelects() {
     return { visitors, employees, logs };
 }
 
-async function renderAccessTable(targetId = "accessTable") {
+async function renderAccessTable(targetId = "accessTable", editable = true) {
     const table = document.getElementById(targetId);
     if (!table) {
         return [];
@@ -248,10 +283,21 @@ async function renderAccessTable(targetId = "accessTable") {
                 <td>${String(log.entryTime).slice(0, 5)}</td>
                 <td>${log.exitTime ? String(log.exitTime).slice(0, 5) : "Still in building"}</td>
                 <td>${log.recordedBy}</td>
+                ${editable ? `
+                <td>
+                    <div class="inline-actions">
+                        <button type="button" class="btn btn-secondary btn-small" data-edit-access="${log.id}">Edit</button>
+                        <button type="button" class="btn btn-danger btn-small" data-delete-access="${log.id}">Delete</button>
+                    </div>
+                </td>
+                ` : ""}
             </tr>
         `).join("")
-        : tableEmptyRow(6, "No access activity recorded yet.");
+        : tableEmptyRow(editable ? 7 : 6, "No access activity recorded yet.");
 
+    if (editable) {
+        bindAccessRowActions(logs);
+    }
     return logs;
 }
 
@@ -367,7 +413,7 @@ async function renderDashboard() {
             : "No incidents logged yet.";
     }
 
-    await renderAccessTable("dashboardAccessTable");
+    await renderAccessTable("dashboardAccessTable", false);
 
     const securityActions = document.querySelectorAll("[href=\"visitor-registration.html\"], [href=\"access-control.html\"], [href=\"incident-report.html\"]");
     const userActions = document.querySelectorAll("[href=\"users.html\"], [href=\"employees.html\"], [href=\"reports.html\"]");
@@ -442,14 +488,32 @@ async function renderEmployeesTable() {
     return employees;
 }
 
-async function renderReportsTable(rows = []) {
+function renderReportsHeader(type) {
+    const head = document.getElementById("reportsHead");
+    if (!head) {
+        return;
+    }
+
+    const headings = {
+        access: ["Date", "Visitor", "Host", "Entry", "Exit", "Recorded By"],
+        incidents: ["Date", "Title", "Type", "Location", "Severity", "Status", "Reported By"],
+        visitors: ["Date", "Visitor", "ID / Passport", "Phone", "Purpose"],
+        audit: ["Date", "Action", "Entity", "Entity ID", "User", "Details"]
+    };
+
+    head.innerHTML = `<tr>${(headings[type] || headings.access).map((label) => `<th>${label}</th>`).join("")}</tr>`;
+}
+
+async function renderReportsTable(rows = [], type = "access") {
     const table = document.getElementById("reportsTable");
     if (!table) {
         return;
     }
 
-    table.innerHTML = rows.length
-        ? rows.map((log) => `
+    renderReportsHeader(type);
+
+    const renderers = {
+        access: (log) => `
             <tr>
                 <td>${log.date}</td>
                 <td>${log.visitorName}</td>
@@ -458,8 +522,44 @@ async function renderReportsTable(rows = []) {
                 <td>${log.exitTime ? String(log.exitTime).slice(0, 5) : "Still in building"}</td>
                 <td>${log.recordedBy}</td>
             </tr>
-        `).join("")
-        : tableEmptyRow(6, "No records found for the selected date range.");
+        `,
+        incidents: (incident) => `
+            <tr>
+                <td>${incident.date}</td>
+                <td>${incident.title}</td>
+                <td>${incident.incidentType}</td>
+                <td>${incident.location}</td>
+                <td>${incident.severity}</td>
+                <td>${incident.status}</td>
+                <td>${incident.reportedBy}</td>
+            </tr>
+        `,
+        visitors: (visitor) => `
+            <tr>
+                <td>${visitor.date}</td>
+                <td>${visitor.name}</td>
+                <td>${visitor.nationalId}</td>
+                <td>${visitor.phoneNumber}</td>
+                <td>${visitor.purposeOfVisit}</td>
+            </tr>
+        `,
+        audit: (entry) => `
+            <tr>
+                <td>${entry.date}</td>
+                <td>${entry.actionType}</td>
+                <td>${entry.entityType}</td>
+                <td>${entry.entityId || "-"}</td>
+                <td>${entry.username}</td>
+                <td>${entry.details}</td>
+            </tr>
+        `
+    };
+
+    const colspans = { access: 6, incidents: 7, visitors: 5, audit: 6 };
+
+    table.innerHTML = rows.length
+        ? rows.map(renderers[type] || renderers.access).join("")
+        : tableEmptyRow(colspans[type] || 6, "No records found for the selected date range.");
 }
 
 function bindUserRowActions(users) {
@@ -503,6 +603,52 @@ function bindUserRowActions(users) {
                 message("userMessage", "User deleted successfully.");
             } catch (error) {
                 message("userMessage", error.message, true);
+            }
+        });
+    });
+}
+
+function bindVisitorRowActions(visitors) {
+    document.querySelectorAll("[data-edit-visitor]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const visitorId = Number(button.getAttribute("data-edit-visitor"));
+            const visitor = visitors.find((item) => item.id === visitorId);
+            if (!visitor) {
+                return;
+            }
+
+            document.getElementById("editVisitorId").value = String(visitor.id);
+            document.getElementById("editVisitorName").value = visitor.name;
+            document.getElementById("editVisitorNationalId").value = visitor.nationalId;
+            document.getElementById("editVisitorPhoneNumber").value = visitor.phoneNumber;
+            document.getElementById("editVisitorPurposeOfVisit").value = visitor.purposeOfVisit;
+            message("visitorMessage", `Editing ${visitor.name}. Update the details and save changes.`);
+        });
+    });
+
+    document.querySelectorAll("[data-delete-visitor]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const visitorId = button.getAttribute("data-delete-visitor");
+
+            if (!window.confirm("Delete this visitor record?")) {
+                return;
+            }
+
+            try {
+                await api("/api/visitors/delete", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: formBody({
+                        visitorId
+                    })
+                });
+
+                await renderVisitorTable();
+                message("visitorMessage", "Visitor deleted successfully.");
+            } catch (error) {
+                message("visitorMessage", error.message, true);
             }
         });
     });
@@ -678,6 +824,54 @@ function bindAccessForms() {
             }
         });
     }
+}
+
+function bindAccessRowActions(logs) {
+    document.querySelectorAll("[data-edit-access]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const logId = Number(button.getAttribute("data-edit-access"));
+            const log = logs.find((item) => item.id === logId);
+            if (!log) {
+                return;
+            }
+
+            document.getElementById("editLogId").value = String(log.id);
+            document.getElementById("editVisitorId").value = String(log.visitorId);
+            document.getElementById("editEmployeeId").value = String(log.employeeId);
+            document.getElementById("editVisitDate").value = log.date;
+            document.getElementById("editEntryTime").value = String(log.entryTime).slice(0, 5);
+            document.getElementById("editExitTime").value = log.exitTime ? String(log.exitTime).slice(0, 5) : "";
+            message("accessMessage", `Editing access record #${log.id}. Update the fields and save changes.`);
+        });
+    });
+
+    document.querySelectorAll("[data-delete-access]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const logId = button.getAttribute("data-delete-access");
+
+            if (!window.confirm("Delete this access record?")) {
+                return;
+            }
+
+            try {
+                await api("/api/access-logs/delete", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: formBody({
+                        logId
+                    })
+                });
+
+                await renderAccessSelects();
+                await renderAccessTable();
+                message("accessMessage", "Access record deleted successfully.");
+            } catch (error) {
+                message("accessMessage", error.message, true);
+            }
+        });
+    });
 }
 
 function bindIncidentForm() {
@@ -862,6 +1056,77 @@ function bindUserForms() {
     });
 }
 
+function bindVisitorEditForm() {
+    const form = document.getElementById("visitorEditForm");
+    if (!form) {
+        return;
+    }
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        try {
+            await api("/api/visitors/update", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formBody({
+                    visitorId: document.getElementById("editVisitorId").value,
+                    name: document.getElementById("editVisitorName").value.trim(),
+                    nationalId: document.getElementById("editVisitorNationalId").value.trim(),
+                    phoneNumber: document.getElementById("editVisitorPhoneNumber").value.trim(),
+                    purposeOfVisit: document.getElementById("editVisitorPurposeOfVisit").value.trim()
+                })
+            });
+
+            form.reset();
+            document.getElementById("editVisitorId").value = "";
+            await renderVisitorTable();
+            await renderAccessSelects();
+            message("visitorMessage", "Visitor updated successfully.");
+        } catch (error) {
+            message("visitorMessage", error.message, true);
+        }
+    });
+}
+
+function bindAccessEditForm() {
+    const form = document.getElementById("accessEditForm");
+    if (!form) {
+        return;
+    }
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        try {
+            await api("/api/access-logs/update", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formBody({
+                    logId: document.getElementById("editLogId").value,
+                    visitorId: document.getElementById("editVisitorId").value,
+                    employeeId: document.getElementById("editEmployeeId").value,
+                    visitDate: document.getElementById("editVisitDate").value,
+                    entryTime: document.getElementById("editEntryTime").value,
+                    exitTime: document.getElementById("editExitTime").value
+                })
+            });
+
+            form.reset();
+            document.getElementById("editLogId").value = "";
+            await renderAccessSelects();
+            await renderAccessTable();
+            message("accessMessage", "Access record updated successfully.");
+        } catch (error) {
+            message("accessMessage", error.message, true);
+        }
+    });
+}
+
 function bindEmployeeForms() {
     const createForm = document.getElementById("employeeCreateForm");
     const editForm = document.getElementById("employeeEditForm");
@@ -923,12 +1188,14 @@ function bindEmployeeForms() {
 
 function bindReportForm() {
     const form = document.getElementById("reportForm");
+    const exportButton = document.getElementById("exportReport");
     if (!form) {
         return;
     }
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        const reportType = document.getElementById("reportType").value;
         const startDate = document.getElementById("reportStartDate").value;
         const endDate = document.getElementById("reportEndDate").value;
 
@@ -943,13 +1210,39 @@ function bindReportForm() {
         }
 
         try {
-            const rows = await loadAccessReport(startDate, endDate);
-            await renderReportsTable(rows);
+            const loaders = {
+                access: loadAccessReport,
+                incidents: loadIncidentReport,
+                visitors: loadVisitorReport,
+                audit: loadAuditReport
+            };
+            const rows = await (loaders[reportType] || loadAccessReport)(startDate, endDate);
+            await renderReportsTable(rows, reportType);
             message("reportMessage", `Report generated successfully. ${rows.length} record(s) found.`);
         } catch (error) {
             message("reportMessage", error.message, true);
         }
     });
+
+    if (exportButton) {
+        exportButton.addEventListener("click", () => {
+            const reportType = document.getElementById("reportType").value;
+            const startDate = document.getElementById("reportStartDate").value;
+            const endDate = document.getElementById("reportEndDate").value;
+
+            if (!startDate || !endDate) {
+                message("reportMessage", "Select both start date and end date before exporting.", true);
+                return;
+            }
+
+            if (startDate > endDate) {
+                message("reportMessage", "Start date cannot be after end date.", true);
+                return;
+            }
+
+            window.location.href = `/api/reports/export?type=${encodeURIComponent(reportType)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+        });
+    }
 }
 
 async function initializePage(page) {
@@ -959,10 +1252,12 @@ async function initializePage(page) {
             break;
         case "visitor-registration":
             bindVisitorForm();
+            bindVisitorEditForm();
             await renderVisitorTable();
             break;
         case "access-control":
             bindAccessForms();
+            bindAccessEditForm();
             await renderAccessSelects();
             await renderAccessTable();
             break;
@@ -982,7 +1277,7 @@ async function initializePage(page) {
             break;
         case "reports":
             bindReportForm();
-            await renderReportsTable([]);
+            await renderReportsTable([], "access");
             break;
         case "login":
             bindLogin();

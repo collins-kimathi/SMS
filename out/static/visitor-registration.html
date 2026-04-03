@@ -22,35 +22,68 @@
     </nav>
 
     <div class="container animate-fade page-shell">
-        <div class="glass-panel form-panel">
-            <h2>Register New Visitor</h2>
-            <p class="muted-block">Create a visitor profile so the guest can be checked in quickly at the access desk.</p>
+        <div class="dashboard-grid split-grid">
+            <div class="glass-panel form-panel">
+                <h2>Register New Visitor</h2>
+                <p class="muted-block">Create a visitor profile so the guest can be checked in quickly at the access desk.</p>
 
-            <div id="visitorMessage" class="alert alert-success hidden"></div>
+                <div id="visitorMessage" class="alert alert-success hidden"></div>
 
-            <form class="stacked-form" id="visitorForm">
-                <div class="form-group">
-                    <label for="name">Full Name</label>
-                    <input type="text" id="name" name="name" required placeholder="e.g. Jane Mwangi">
-                </div>
+                <form class="stacked-form" id="visitorForm">
+                    <div class="form-group">
+                        <label for="name">Full Name</label>
+                        <input type="text" id="name" name="name" required placeholder="e.g. Jane Mwangi">
+                    </div>
 
-                <div class="form-group">
-                    <label for="nationalId">National ID / Passport</label>
-                    <input type="text" id="nationalId" name="nationalId" required placeholder="Enter ID or passport number">
-                </div>
+                    <div class="form-group">
+                        <label for="nationalId">National ID / Passport</label>
+                        <input type="text" id="nationalId" name="nationalId" required placeholder="Enter ID or passport number">
+                    </div>
 
-                <div class="form-group">
-                    <label for="phoneNumber">Phone Number</label>
-                    <input type="text" id="phoneNumber" name="phoneNumber" required placeholder="Enter phone number">
-                </div>
+                    <div class="form-group">
+                        <label for="phoneNumber">Phone Number</label>
+                        <input type="text" id="phoneNumber" name="phoneNumber" required placeholder="Enter phone number">
+                    </div>
 
-                <div class="form-group">
-                    <label for="purposeOfVisit">Purpose of Visit</label>
-                    <textarea id="purposeOfVisit" name="purposeOfVisit" rows="4" required placeholder="Meeting, delivery, maintenance, interview, or other purpose"></textarea>
-                </div>
+                    <div class="form-group">
+                        <label for="purposeOfVisit">Purpose of Visit</label>
+                        <textarea id="purposeOfVisit" name="purposeOfVisit" rows="4" required placeholder="Meeting, delivery, maintenance, interview, or other purpose"></textarea>
+                    </div>
 
-                <button type="submit" class="btn btn-primary full-width">Save Visitor</button>
-            </form>
+                    <button type="submit" class="btn btn-primary full-width">Save Visitor</button>
+                </form>
+            </div>
+
+            <div class="glass-panel form-panel">
+                <h2>Edit Visitor</h2>
+                <p class="muted-block">Select a visitor below to correct registration details or remove old records.</p>
+
+                <form class="stacked-form" id="visitorEditForm">
+                    <input type="hidden" id="editVisitorId">
+
+                    <div class="form-group">
+                        <label for="editVisitorName">Full Name</label>
+                        <input type="text" id="editVisitorName" required placeholder="Choose a visitor from the table">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editVisitorNationalId">National ID / Passport</label>
+                        <input type="text" id="editVisitorNationalId" required placeholder="Enter ID or passport number">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editVisitorPhoneNumber">Phone Number</label>
+                        <input type="text" id="editVisitorPhoneNumber" required placeholder="Enter phone number">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editVisitorPurposeOfVisit">Purpose of Visit</label>
+                        <textarea id="editVisitorPurposeOfVisit" rows="4" required placeholder="Update the visit purpose"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-secondary full-width">Update Visitor</button>
+                </form>
+            </div>
         </div>
 
         <div class="glass-panel top-gap">
@@ -62,6 +95,7 @@
                         <th>ID / Passport</th>
                         <th>Phone</th>
                         <th>Purpose</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="visitorTable"></tbody>

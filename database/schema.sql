@@ -51,6 +51,27 @@ CREATE TABLE IF NOT EXISTS incidents (
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id VARCHAR(128) PRIMARY KEY,
+    user_id INT NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    role VARCHAR(20) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    audit_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    username VARCHAR(50) NOT NULL,
+    action_type VARCHAR(30) NOT NULL,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id VARCHAR(100) NULL,
+    details TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
+);
+
 INSERT INTO users (username, password, role)
 VALUES
     ('admin', 'pbkdf2$120000$POOsBFf_peqnlv6u-ModBQ$UWYluVYxOKIOj808UyGZ_7CzpYfNlMfEzKyxFGz-__E', 'Admin'),

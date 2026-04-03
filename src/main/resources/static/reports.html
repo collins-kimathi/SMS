@@ -14,6 +14,7 @@
             <a href="users.html">User Management</a>
             <a href="employees.html">Employee Management</a>
             <a href="reports.html" class="is-active">Reports</a>
+            <a href="audit-history.html">Audit History</a>
             <a href="visitor-registration.html">Register Visitor</a>
             <a href="access-control.html">Access Control</a>
             <a href="incident-report.html">Report Incident</a>
@@ -34,6 +35,7 @@
                         <option value="access">Access Logs</option>
                         <option value="incidents">Incident Reports</option>
                         <option value="visitors">Visitor Registrations</option>
+                        <option value="audit">Audit Trail</option>
                     </select>
                 </div>
 
@@ -49,7 +51,10 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary full-width">Generate Report</button>
+                <div class="inline-actions">
+                    <button type="submit" class="btn btn-primary">Generate Report</button>
+                    <button type="button" class="btn btn-secondary" id="exportReport">Export CSV</button>
+                </div>
             </form>
         </div>
 

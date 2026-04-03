@@ -21,13 +21,23 @@
         </div>
     </nav>
 
-    <div class="container animate-fade page-shell">
-        <div class="glass-panel form-panel">
-            <h2>Access Reports</h2>
-            <p class="muted-block">Filter access logs by visit date to generate a simple operational report.</p>
+        <div class="container animate-fade page-shell">
+            <div class="glass-panel form-panel">
+            <h2>Operational Reports</h2>
+            <p class="muted-block">Generate access, incident, or visitor reports for a selected date range.</p>
             <div id="reportMessage" class="alert alert-success hidden"></div>
 
             <form class="stacked-form" id="reportForm">
+                <div class="form-group">
+                    <label for="reportType">Report Type</label>
+                    <select id="reportType" required>
+                        <option value="access">Access Logs</option>
+                        <option value="incidents">Incident Reports</option>
+                        <option value="visitors">Visitor Registrations</option>
+                        <option value="audit">Audit Trail</option>
+                    </select>
+                </div>
+
                 <div class="dashboard-grid">
                     <div class="form-group">
                         <label for="reportStartDate">Start Date</label>
@@ -40,23 +50,17 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary full-width">Generate Report</button>
+                <div class="inline-actions">
+                    <button type="submit" class="btn btn-primary">Generate Report</button>
+                    <button type="button" class="btn btn-secondary" id="exportReport">Export CSV</button>
+                </div>
             </form>
         </div>
 
         <div class="glass-panel top-gap">
             <h3>Report Results</h3>
             <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Visitor</th>
-                        <th>Host</th>
-                        <th>Entry</th>
-                        <th>Exit</th>
-                        <th>Recorded By</th>
-                    </tr>
-                </thead>
+                <thead id="reportsHead"></thead>
                 <tbody id="reportsTable"></tbody>
             </table>
         </div>
