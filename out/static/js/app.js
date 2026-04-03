@@ -1,24 +1,15 @@
-const SESSION_KEY = "sms-session";
+let currentSession = null;
 
 function getSession() {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) {
-        return null;
-    }
-
-    try {
-        return JSON.parse(raw);
-    } catch (_error) {
-        return null;
-    }
+    return currentSession;
 }
 
 function setSession(session) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    currentSession = session;
 }
 
 function clearSession() {
-    localStorage.removeItem(SESSION_KEY);
+    currentSession = null;
 }
 
 function message(elementId, text, isError = false) {
@@ -118,8 +109,13 @@ function applyRolePermissions() {
 
 function bindLogout() {
     document.querySelectorAll("[data-logout]").forEach((link) => {
-        link.addEventListener("click", (event) => {
+        link.addEventListener("click", async (event) => {
             event.preventDefault();
+            try {
+                await api("/api/logout", { method: "POST" });
+            } catch (_error) {
+                // Clear client state even if the server session is already gone.
+            }
             clearSession();
             window.location.href = "login.html";
         });
@@ -127,11 +123,16 @@ function bindLogout() {
 }
 
 async function api(path, options = {}) {
-    const response = await fetch(path, options);
+    const response = await fetch(path, {
+        credentials: "same-origin",
+        ...options
+    });
     const contentType = response.headers.get("Content-Type") || "";
-    const payload = contentType.includes("application/json")
-        ? await response.json()
-        : await response.text();
+    const payload = response.status === 204
+        ? null
+        : contentType.includes("application/json")
+            ? await response.json()
+            : await response.text();
 
     if (!response.ok) {
         const messageText = typeof payload === "string" ? payload : payload.message || "Request failed";
@@ -162,13 +163,11 @@ async function loadIncidents() {
 }
 
 async function loadUsers() {
-    const session = getSession();
-    return api(`/api/users?userId=${encodeURIComponent(session ? session.userId : "")}`);
+    return api("/api/users");
 }
 
 async function loadAccessReport(startDate, endDate) {
-    const session = getSession();
-    return api(`/api/reports/access?userId=${encodeURIComponent(session ? session.userId : "")}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+    return api(`/api/reports/access?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
 
 async function renderVisitorTable() {
@@ -425,7 +424,6 @@ function bindUserRowActions(users) {
                         "Content-Type": "application/x-www-form-urlencoded"
                     },
                     body: formBody({
-                        adminUserId: session ? String(session.userId) : "",
                         targetUserId
                     })
                 });
@@ -495,8 +493,7 @@ function bindVisitorForm() {
                     name: document.getElementById("name").value.trim(),
                     nationalId: document.getElementById("nationalId").value.trim(),
                     phoneNumber: document.getElementById("phoneNumber").value.trim(),
-                    purposeOfVisit: document.getElementById("purposeOfVisit").value.trim(),
-                    userId: session ? String(session.userId) : ""
+                    purposeOfVisit: document.getElementById("purposeOfVisit").value.trim()
                 })
             });
 
@@ -526,8 +523,7 @@ function bindAccessForms() {
                     },
                     body: formBody({
                         visitorId: document.getElementById("visitorId").value,
-                        employeeId: document.getElementById("employeeId").value,
-                        userId: session ? String(session.userId) : ""
+                        employeeId: document.getElementById("employeeId").value
                     })
                 });
 
@@ -553,8 +549,7 @@ function bindAccessForms() {
                     "Content-Type": "application/x-www-form-urlencoded"
                     },
                     body: formBody({
-                        visitorId: document.getElementById("exitVisitorId").value,
-                        userId: session ? String(session.userId) : ""
+                        visitorId: document.getElementById("exitVisitorId").value
                     })
                 });
 
@@ -588,8 +583,7 @@ function bindIncidentForm() {
                 body: formBody({
                     title: document.getElementById("title").value.trim(),
                     severity: document.getElementById("severity").value,
-                    description: document.getElementById("description").value.trim(),
-                    userId: session ? String(session.userId) : ""
+                    description: document.getElementById("description").value.trim()
                 })
             });
 
@@ -620,7 +614,6 @@ function bindUserForms() {
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
                 body: formBody({
-                    adminUserId: session ? String(session.userId) : "",
                     username: document.getElementById("newUsername").value.trim(),
                     password: document.getElementById("newPassword").value.trim(),
                     role: document.getElementById("newRole").value
@@ -646,7 +639,6 @@ function bindUserForms() {
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
                 body: formBody({
-                    adminUserId: session ? String(session.userId) : "",
                     targetUserId: document.getElementById("editUserId").value,
                     username: document.getElementById("editUsername").value.trim(),
                     password: document.getElementById("editPassword").value.trim(),
@@ -737,14 +729,23 @@ async function initializePage(page) {
 document.addEventListener("DOMContentLoaded", async () => {
     const page = document.body.dataset.page || "";
 
-    if (!protectRoute(page)) {
-        return;
-    }
-
     bindLogout();
-    applyRolePermissions();
 
     try {
+        try {
+            setSession(await api("/api/session"));
+        } catch (error) {
+            clearSession();
+            if (!/Login required/i.test(error.message)) {
+                throw error;
+            }
+        }
+
+        if (!protectRoute(page)) {
+            return;
+        }
+
+        applyRolePermissions();
         await initializePage(page);
     } catch (error) {
         const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : page === "reports" ? "reportMessage" : null;

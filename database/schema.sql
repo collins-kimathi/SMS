@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS visitors (
     visitor_id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    national_id VARCHAR(50) NOT NULL UNIQUE,x
+    national_id VARCHAR(50) NOT NULL UNIQUE,
     phone_number VARCHAR(20) NOT NULL,
     purpose_of_visit VARCHAR(255) NOT NULL
 );
@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS access_logs (
 CREATE TABLE IF NOT EXISTS incidents (
     incident_id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(150) NOT NULL,
+    incident_type VARCHAR(50) NOT NULL,
+    location VARCHAR(150) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    action_taken TEXT NULL,
     description TEXT NOT NULL,
     severity VARCHAR(20) NOT NULL,
     user_id INT NOT NULL,

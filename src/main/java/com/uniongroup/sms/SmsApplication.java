@@ -10,6 +10,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.Date;
 import java.sql.DriverManager;
@@ -21,19 +22,25 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class SmsApplication {
 
     private static final int DEFAULT_PORT = 8080;
     private static final String STATIC_ROOT = "/static";
+    private static final String SESSION_COOKIE = "sms_session";
+    private static final long SESSION_TTL_MILLIS = 8L * 60L * 60L * 1000L;
     private static final String DB_URL = envOrDefault("SMS_DB_URL", "jdbc:mysql://localhost:3306/sms_db?serverTimezone=UTC");
     private static final String DB_USER = envOrDefault("SMS_DB_USER", "root");
     private static final String DB_PASSWORD = envOrDefault("SMS_DB_PASSWORD", "1234");
     private static final Map<String, String> CONTENT_TYPES = new HashMap<>();
+    private static final Map<String, SessionInfo> SESSIONS = new ConcurrentHashMap<>();
+    private static final SecureRandom SESSION_RANDOM = new SecureRandom();
 
     static {
         CONTENT_TYPES.put("html", "text/html; charset=UTF-8");
@@ -48,6 +55,7 @@ public class SmsApplication {
 
     public static void main(String[] args) throws IOException {
         int port = resolvePort(args);
+        initializeDatabaseState();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/", SmsApplication::handleRequest);
         server.setExecutor(null);
@@ -85,6 +93,14 @@ public class SmsApplication {
                 case "/api/login":
                     requireMethod(exchange, "POST");
                     handleLogin(exchange);
+                    break;
+                case "/api/session":
+                    requireMethod(exchange, "GET");
+                    handleSession(exchange);
+                    break;
+                case "/api/logout":
+                    requireMethod(exchange, "POST");
+                    handleLogout(exchange);
                     break;
                 case "/api/visitors":
                     if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -137,6 +153,10 @@ public class SmsApplication {
                     requireMethod(exchange, "POST");
                     handleDeleteUser(exchange);
                     break;
+                case "/api/reports/access":
+                    requireMethod(exchange, "GET");
+                    handleAccessReport(exchange);
+                    break;
                 default:
                     sendJson(exchange, 404, "{\"message\":\"Endpoint not found\"}");
                     break;
@@ -145,6 +165,8 @@ public class SmsApplication {
             sendJson(exchange, 400, "{\"message\":\"" + escapeJson(exception.getMessage()) + "\"}");
         } catch (IllegalStateException exception) {
             sendJson(exchange, 405, "{\"message\":\"" + escapeJson(exception.getMessage()) + "\"}");
+        } catch (UnauthorizedException exception) {
+            sendJson(exchange, 401, "{\"message\":\"" + escapeJson(exception.getMessage()) + "\"}");
         } catch (SecurityException exception) {
             sendJson(exchange, 403, "{\"message\":\"" + escapeJson(exception.getMessage()) + "\"}");
         } catch (SQLException exception) {
@@ -178,6 +200,13 @@ public class SmsApplication {
                     return;
                 }
 
+                SessionInfo session = createSession(
+                    resultSet.getInt("user_id"),
+                    resultSet.getString("username"),
+                    defaultString(resultSet.getString("role"), "Security")
+                );
+                setSessionCookie(exchange, session.sessionId);
+
                 String response = "{"
                     + "\"userId\":" + resultSet.getInt("user_id") + ","
                     + "\"username\":\"" + escapeJson(resultSet.getString("username")) + "\","
@@ -188,7 +217,22 @@ public class SmsApplication {
         }
     }
 
+    private static void handleSession(HttpExchange exchange) throws IOException {
+        SessionInfo session = requireAuthenticated(exchange);
+        sendJson(exchange, 200, sessionToJson(session));
+    }
+
+    private static void handleLogout(HttpExchange exchange) throws IOException {
+        SessionInfo session = getOptionalSession(exchange);
+        if (session != null) {
+            SESSIONS.remove(session.sessionId);
+        }
+        clearSessionCookie(exchange);
+        sendJson(exchange, 200, "{\"message\":\"Logged out successfully\"}");
+    }
+
     private static void handleVisitorsList(HttpExchange exchange) throws IOException, SQLException {
+        requireAuthenticated(exchange);
         String sql = "SELECT visitor_id, name, national_id, phone_number, purpose_of_visit FROM visitors ORDER BY visitor_id DESC";
         List<String> rows = new ArrayList<>();
 
@@ -210,12 +254,12 @@ public class SmsApplication {
     }
 
     private static void handleCreateVisitor(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
         Map<String, String> form = parseFormBody(exchange);
         String name = trim(form.get("name"));
         String nationalId = trim(form.get("nationalId"));
         String phoneNumber = trim(form.get("phoneNumber"));
         String purposeOfVisit = trim(form.get("purposeOfVisit"));
-        int userId = parseRequiredInt(form.get("userId"), "User is required");
 
         if (name.isEmpty() || nationalId.isEmpty() || phoneNumber.isEmpty() || purposeOfVisit.isEmpty()) {
             sendJson(exchange, 400, "{\"message\":\"All visitor fields are required\"}");
@@ -223,7 +267,7 @@ public class SmsApplication {
         }
 
         try (Connection connection = getConnection()) {
-            requireSecurityOfficer(connection, userId);
+            requireSecurityOfficer(session);
 
             if (visitorExists(connection, nationalId)) {
                 sendJson(exchange, 409, "{\"message\":\"Visitor already registered\"}");
@@ -244,6 +288,7 @@ public class SmsApplication {
     }
 
     private static void handleEmployeesList(HttpExchange exchange) throws IOException, SQLException {
+        requireAuthenticated(exchange);
         String sql = "SELECT employee_id, name, department, phone_number FROM employees ORDER BY name ASC";
         List<String> rows = new ArrayList<>();
 
@@ -264,6 +309,7 @@ public class SmsApplication {
     }
 
     private static void handleAccessLogsList(HttpExchange exchange) throws IOException, SQLException {
+        requireAuthenticated(exchange);
         String sql = ""
             + "SELECT al.log_id, al.visitor_id, al.employee_id, al.user_id, al.visit_date, al.entry_time, al.exit_time, "
             + "v.name AS visitor_name, e.name AS employee_name, e.department, u.username "
@@ -298,13 +344,13 @@ public class SmsApplication {
     }
 
     private static void handleRecordEntry(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
         Map<String, String> form = parseFormBody(exchange);
         int visitorId = parseRequiredInt(form.get("visitorId"), "Visitor is required");
         int employeeId = parseRequiredInt(form.get("employeeId"), "Employee is required");
-        int userId = parseRequiredInt(form.get("userId"), "User is required");
 
         try (Connection connection = getConnection()) {
-            requireSecurityOfficer(connection, userId);
+            requireSecurityOfficer(session);
 
             if (hasActiveAccessLog(connection, visitorId)) {
                 sendJson(exchange, 409, "{\"message\":\"Visitor already has an active access record\"}");
@@ -315,7 +361,7 @@ public class SmsApplication {
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setInt(1, visitorId);
                 statement.setInt(2, employeeId);
-                statement.setInt(3, userId);
+                statement.setInt(3, session.userId);
                 statement.setDate(4, Date.valueOf(LocalDate.now()));
                 statement.setTime(5, Time.valueOf(LocalTime.now().withSecond(0).withNano(0)));
                 statement.executeUpdate();
@@ -326,13 +372,13 @@ public class SmsApplication {
     }
 
     private static void handleRecordExit(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
         Map<String, String> form = parseFormBody(exchange);
         int visitorId = parseRequiredInt(form.get("visitorId"), "Visitor is required");
-        int userId = parseRequiredInt(form.get("userId"), "User is required");
         String sql = "UPDATE access_logs SET exit_time = ? WHERE visitor_id = ? AND exit_time IS NULL ORDER BY log_id DESC LIMIT 1";
 
         try (Connection connection = getConnection()) {
-            requireSecurityOfficer(connection, userId);
+            requireSecurityOfficer(session);
 
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setTime(1, Time.valueOf(LocalTime.now().withSecond(0).withNano(0)));
@@ -350,8 +396,10 @@ public class SmsApplication {
     }
 
     private static void handleIncidentsList(HttpExchange exchange) throws IOException, SQLException {
+        requireAuthenticated(exchange);
         String sql = ""
-            + "SELECT i.incident_id, i.title, i.description, i.severity, i.reported_at, u.user_id, u.username "
+            + "SELECT i.incident_id, i.title, i.incident_type, i.location, i.status, i.action_taken, "
+            + "i.description, i.severity, i.reported_at, u.user_id, u.username "
             + "FROM incidents i "
             + "JOIN users u ON i.user_id = u.user_id "
             + "ORDER BY i.incident_id DESC";
@@ -364,6 +412,10 @@ public class SmsApplication {
                 rows.add("{"
                     + "\"id\":" + resultSet.getInt("incident_id") + ","
                     + "\"title\":\"" + escapeJson(resultSet.getString("title")) + "\","
+                    + "\"incidentType\":\"" + escapeJson(resultSet.getString("incident_type")) + "\","
+                    + "\"location\":\"" + escapeJson(resultSet.getString("location")) + "\","
+                    + "\"status\":\"" + escapeJson(resultSet.getString("status")) + "\","
+                    + "\"actionTaken\":\"" + escapeJson(defaultString(resultSet.getString("action_taken"), "")) + "\","
                     + "\"description\":\"" + escapeJson(resultSet.getString("description")) + "\","
                     + "\"severity\":\"" + escapeJson(resultSet.getString("severity")) + "\","
                     + "\"date\":\"" + resultSet.getTimestamp("reported_at").toLocalDateTime().toLocalDate() + "\","
@@ -377,28 +429,36 @@ public class SmsApplication {
     }
 
     private static void handleCreateIncident(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
         Map<String, String> form = parseFormBody(exchange);
         String title = trim(form.get("title"));
+        String incidentType = trim(form.get("incidentType"));
+        String location = trim(form.get("location"));
         String severity = trim(form.get("severity"));
+        String status = trim(form.get("status"));
+        String actionTaken = trim(form.get("actionTaken"));
         String description = trim(form.get("description"));
-        int userId = parseRequiredInt(form.get("userId"), "User is required");
 
-        if (title.isEmpty() || severity.isEmpty() || description.isEmpty()) {
+        if (title.isEmpty() || incidentType.isEmpty() || location.isEmpty() || severity.isEmpty() || status.isEmpty() || description.isEmpty()) {
             sendJson(exchange, 400, "{\"message\":\"All incident fields are required\"}");
             return;
         }
 
-        String sql = "INSERT INTO incidents (title, description, severity, user_id, reported_at) VALUES (?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO incidents (title, incident_type, location, status, action_taken, description, severity, user_id, reported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection connection = getConnection()) {
-            requireSecurityOfficer(connection, userId);
+            requireSecurityOfficer(session);
 
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setString(1, title);
-                statement.setString(2, description);
-                statement.setString(3, severity);
-                statement.setInt(4, userId);
-                statement.setTimestamp(5, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
+                statement.setString(2, incidentType);
+                statement.setString(3, location);
+                statement.setString(4, status);
+                statement.setString(5, actionTaken);
+                statement.setString(6, description);
+                statement.setString(7, severity);
+                statement.setInt(8, session.userId);
+                statement.setTimestamp(9, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
                 statement.executeUpdate();
             }
         }
@@ -407,14 +467,13 @@ public class SmsApplication {
     }
 
     private static void handleUsersList(HttpExchange exchange) throws IOException, SQLException {
-        Map<String, String> query = parseQuery(exchange.getRequestURI());
-        int userId = parseRequiredInt(query.get("userId"), "User is required");
+        SessionInfo session = requireAuthenticated(exchange);
         String sql = "SELECT user_id, username, role FROM users ORDER BY user_id ASC";
         List<String> rows = new ArrayList<>();
 
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            requireAdmin(connection, userId);
+            requireAdmin(session);
 
             try (ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
@@ -431,8 +490,8 @@ public class SmsApplication {
     }
 
     private static void handleCreateUser(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
         Map<String, String> form = parseFormBody(exchange);
-        int adminUserId = parseRequiredInt(form.get("adminUserId"), "Admin user is required");
         String username = trim(form.get("username"));
         String password = trim(form.get("password"));
         String role = trim(form.get("role"));
@@ -443,7 +502,7 @@ public class SmsApplication {
         }
 
         try (Connection connection = getConnection()) {
-            requireAdmin(connection, adminUserId);
+            requireAdmin(session);
 
             if (usernameExists(connection, username, null)) {
                 sendJson(exchange, 409, "{\"message\":\"Username already exists\"}");
@@ -463,8 +522,8 @@ public class SmsApplication {
     }
 
     private static void handleUpdateUser(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
         Map<String, String> form = parseFormBody(exchange);
-        int adminUserId = parseRequiredInt(form.get("adminUserId"), "Admin user is required");
         int targetUserId = parseRequiredInt(form.get("targetUserId"), "Target user is required");
         String username = trim(form.get("username"));
         String password = trim(form.get("password"));
@@ -476,7 +535,7 @@ public class SmsApplication {
         }
 
         try (Connection connection = getConnection()) {
-            requireAdmin(connection, adminUserId);
+            requireAdmin(session);
 
             if (usernameExists(connection, username, targetUserId)) {
                 sendJson(exchange, 409, "{\"message\":\"Username already exists\"}");
@@ -510,17 +569,17 @@ public class SmsApplication {
     }
 
     private static void handleDeleteUser(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
         Map<String, String> form = parseFormBody(exchange);
-        int adminUserId = parseRequiredInt(form.get("adminUserId"), "Admin user is required");
         int targetUserId = parseRequiredInt(form.get("targetUserId"), "Target user is required");
 
-        if (adminUserId == targetUserId) {
+        if (session.userId == targetUserId) {
             sendJson(exchange, 400, "{\"message\":\"You cannot delete the currently signed-in admin\"}");
             return;
         }
 
         try (Connection connection = getConnection()) {
-            requireAdmin(connection, adminUserId);
+            requireAdmin(session);
 
             String sql = "DELETE FROM users WHERE user_id = ?";
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -540,6 +599,54 @@ public class SmsApplication {
         }
 
         sendJson(exchange, 200, "{\"message\":\"User deleted successfully\"}");
+    }
+
+    private static void handleAccessReport(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = requireAuthenticated(exchange);
+        requireAdmin(session);
+
+        Map<String, String> query = parseQuery(exchange.getRequestURI());
+        String startDate = trim(query.get("startDate"));
+        String endDate = trim(query.get("endDate"));
+
+        if (startDate.isEmpty() || endDate.isEmpty()) {
+            sendJson(exchange, 400, "{\"message\":\"Select both start date and end date\"}");
+            return;
+        }
+
+        String sql = ""
+            + "SELECT al.log_id, al.visit_date, al.entry_time, al.exit_time, "
+            + "v.name AS visitor_name, e.name AS employee_name, e.department, u.username "
+            + "FROM access_logs al "
+            + "JOIN visitors v ON al.visitor_id = v.visitor_id "
+            + "JOIN employees e ON al.employee_id = e.employee_id "
+            + "JOIN users u ON al.user_id = u.user_id "
+            + "WHERE al.visit_date BETWEEN ? AND ? "
+            + "ORDER BY al.visit_date DESC, al.log_id DESC";
+
+        List<String> rows = new ArrayList<>();
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setDate(1, Date.valueOf(startDate));
+            statement.setDate(2, Date.valueOf(endDate));
+
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    String exitTime = resultSet.getTime("exit_time") == null ? "" : resultSet.getTime("exit_time").toString();
+                    rows.add("{"
+                        + "\"id\":" + resultSet.getInt("log_id") + ","
+                        + "\"date\":\"" + resultSet.getDate("visit_date") + "\","
+                        + "\"visitorName\":\"" + escapeJson(resultSet.getString("visitor_name")) + "\","
+                        + "\"host\":\"" + escapeJson(resultSet.getString("employee_name") + " (" + resultSet.getString("department") + ")") + "\","
+                        + "\"entryTime\":\"" + resultSet.getTime("entry_time") + "\","
+                        + "\"exitTime\":\"" + escapeJson(exitTime) + "\","
+                        + "\"recordedBy\":\"" + escapeJson(resultSet.getString("username")) + "\""
+                        + "}");
+                }
+            }
+        }
+
+        sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
     private static boolean visitorExists(Connection connection, String nationalId) throws SQLException {
@@ -562,30 +669,15 @@ public class SmsApplication {
         }
     }
 
-    private static void requireSecurityOfficer(Connection connection, int userId) throws SQLException {
-        String role = findUserRole(connection, userId);
-        if (!isSecurityRole(role)) {
+    private static void requireSecurityOfficer(SessionInfo session) {
+        if (!isSecurityRole(session.role)) {
             throw new SecurityException("Only Security Officers can perform this action");
         }
     }
 
-    private static void requireAdmin(Connection connection, int userId) throws SQLException {
-        String role = findUserRole(connection, userId);
-        if (!isAdminRole(role)) {
+    private static void requireAdmin(SessionInfo session) {
+        if (!isAdminRole(session.role)) {
             throw new SecurityException("Only Admin users can perform this action");
-        }
-    }
-
-    private static String findUserRole(Connection connection, int userId) throws SQLException {
-        String sql = "SELECT role FROM users WHERE user_id = ? LIMIT 1";
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setInt(1, userId);
-            try (ResultSet resultSet = statement.executeQuery()) {
-                if (!resultSet.next()) {
-                    throw new SecurityException("User account not found");
-                }
-                return defaultString(resultSet.getString("role"), "");
-            }
         }
     }
 
@@ -625,6 +717,21 @@ public class SmsApplication {
             return Integer.parseInt(trimmedValue);
         } catch (NumberFormatException exception) {
             throw new IllegalArgumentException(message, exception);
+        }
+    }
+
+    private static void initializeDatabaseState() throws IOException {
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "ALTER TABLE incidents "
+                     + "ADD COLUMN IF NOT EXISTS incident_type VARCHAR(50) NOT NULL DEFAULT 'Security', "
+                     + "ADD COLUMN IF NOT EXISTS location VARCHAR(150) NOT NULL DEFAULT 'Main Facility', "
+                     + "ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'Open', "
+                     + "ADD COLUMN IF NOT EXISTS action_taken TEXT NULL"
+             )) {
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IOException("Failed to initialize database state", exception);
         }
     }
 
@@ -688,11 +795,88 @@ public class SmsApplication {
             String value = entry.length > 1 ? decode(entry[1]) : "";
             values.put(key, value);
         }
+
         return values;
     }
 
     private static String decode(String value) {
         return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    }
+
+    private static SessionInfo requireAuthenticated(HttpExchange exchange) {
+        SessionInfo session = getOptionalSession(exchange);
+        if (session == null) {
+            throw new UnauthorizedException("Login required");
+        }
+        return session;
+    }
+
+    private static SessionInfo getOptionalSession(HttpExchange exchange) {
+        String cookieHeader = exchange.getRequestHeaders().getFirst("Cookie");
+        if (cookieHeader == null || cookieHeader.isBlank()) {
+            return null;
+        }
+
+        String sessionId = null;
+        String[] cookies = cookieHeader.split(";");
+        for (String cookie : cookies) {
+            String[] pair = cookie.trim().split("=", 2);
+            if (pair.length == 2 && SESSION_COOKIE.equals(pair[0])) {
+                sessionId = pair[1];
+                break;
+            }
+        }
+
+        if (sessionId == null || sessionId.isBlank()) {
+            return null;
+        }
+
+        SessionInfo session = SESSIONS.get(sessionId);
+        if (session == null) {
+            return null;
+        }
+
+        if (session.expiresAtMillis < System.currentTimeMillis()) {
+            SESSIONS.remove(sessionId);
+            return null;
+        }
+
+        return session;
+    }
+
+    private static SessionInfo createSession(int userId, String username, String role) {
+        String sessionId = generateSessionId();
+        SessionInfo session = new SessionInfo(sessionId, userId, username, role, System.currentTimeMillis() + SESSION_TTL_MILLIS);
+        SESSIONS.put(sessionId, session);
+        return session;
+    }
+
+    private static String generateSessionId() {
+        byte[] bytes = new byte[32];
+        SESSION_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static void setSessionCookie(HttpExchange exchange, String sessionId) {
+        exchange.getResponseHeaders().add(
+            "Set-Cookie",
+            SESSION_COOKIE + "=" + sessionId + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (SESSION_TTL_MILLIS / 1000L)
+        );
+    }
+
+    private static void clearSessionCookie(HttpExchange exchange) {
+        exchange.getResponseHeaders().add(
+            "Set-Cookie",
+            SESSION_COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+        );
+    }
+
+    private static String sessionToJson(SessionInfo session) {
+        return "{"
+            + "\"userId\":" + session.userId + ","
+            + "\"username\":\"" + escapeJson(session.username) + "\","
+            + "\"role\":\"" + escapeJson(session.role) + "\""
+            + "}";
     }
 
     private static Connection getConnection() throws SQLException {
@@ -829,5 +1013,27 @@ public class SmsApplication {
             }
         }
         return builder.toString();
+    }
+
+    private static final class SessionInfo {
+        private final String sessionId;
+        private final int userId;
+        private final String username;
+        private final String role;
+        private final long expiresAtMillis;
+
+        private SessionInfo(String sessionId, int userId, String username, String role, long expiresAtMillis) {
+            this.sessionId = sessionId;
+            this.userId = userId;
+            this.username = username;
+            this.role = role;
+            this.expiresAtMillis = expiresAtMillis;
+        }
+    }
+
+    private static final class UnauthorizedException extends RuntimeException {
+        private UnauthorizedException(String message) {
+            super(message);
+        }
     }
 }

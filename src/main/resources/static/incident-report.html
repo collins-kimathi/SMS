@@ -33,6 +33,27 @@
                     <input type="text" id="title" name="title" required placeholder="Brief description of the incident">
                 </div>
 
+                <div class="dashboard-grid">
+                    <div class="form-group">
+                        <label for="incidentType">Incident Type</label>
+                        <select id="incidentType" name="incidentType" required>
+                            <option value="">Select incident type</option>
+                            <option>Unauthorized Access</option>
+                            <option>Theft</option>
+                            <option>Vandalism</option>
+                            <option>Medical Emergency</option>
+                            <option>Safety Hazard</option>
+                            <option>Visitor Misconduct</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="location">Location</label>
+                        <input type="text" id="location" name="location" required placeholder="e.g. Main Gate, Floor 2, Server Room">
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label for="severity">Severity</label>
                     <select id="severity" name="severity" required>
@@ -45,8 +66,24 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="status">Status</label>
+                    <select id="status" name="status" required>
+                        <option value="">Select status</option>
+                        <option>Open</option>
+                        <option>Under Investigation</option>
+                        <option>Resolved</option>
+                        <option>Escalated</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
                     <label for="description">Detailed Description</label>
                     <textarea id="description" name="description" rows="6" required placeholder="Provide a detailed account of what occurred"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="actionTaken">Action Taken</label>
+                    <textarea id="actionTaken" name="actionTaken" rows="4" placeholder="Describe the immediate action taken by the security team"></textarea>
                 </div>
 
                 <button type="submit" class="btn btn-primary full-width">Submit Incident Report</button>
@@ -60,8 +97,12 @@
                     <tr>
                         <th>Date</th>
                         <th>Title</th>
+                        <th>Type</th>
+                        <th>Location</th>
                         <th>Severity</th>
+                        <th>Status</th>
                         <th>Reported By</th>
+                        <th>Action Taken</th>
                         <th>Description</th>
                     </tr>
                 </thead>
