@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS visitors (
     name VARCHAR(100) NOT NULL,
     national_id VARCHAR(50) NOT NULL UNIQUE,
     phone_number VARCHAR(20) NOT NULL,
-    purpose_of_visit VARCHAR(255) NOT NULL
+    purpose_of_visit VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS employees (
@@ -52,8 +53,8 @@ CREATE TABLE IF NOT EXISTS incidents (
 
 INSERT INTO users (username, password, role)
 VALUES
-    ('admin', '1234', 'Admin'),
-    ('officer', '1234', 'Security')
+    ('admin', 'pbkdf2$120000$POOsBFf_peqnlv6u-ModBQ$UWYluVYxOKIOj808UyGZ_7CzpYfNlMfEzKyxFGz-__E', 'Admin'),
+    ('officer', 'pbkdf2$120000$JWjzF0NmFNq2bcaJAfQvUg$zkjF007B602zVLsacle8xUY7PxvNEygvc7Eq4oyBeo4', 'Security')
 ON DUPLICATE KEY UPDATE
     password = VALUES(password),
     role = VALUES(role);
