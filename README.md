@@ -41,10 +41,12 @@ This project does not use Maven, Gradle, Spring Boot, or a frontend framework. I
 
 ## Default accounts
 
-The schema seeds these accounts:
+The schema seeds these starter accounts:
 
-- `admin / 1234`
-- `officer / 1234`
+- `admin / Admin@Union2026!`
+- `officer / Officer@Union2026!`
+
+Change them immediately after first login in any real deployment.
 
 ## Project structure
 
@@ -75,19 +77,23 @@ cd <your-repo-folder>
 mysql -u root -p < database/schema.sql
 ```
 
-By default, the application expects:
-
-- database: `sms_db`
-- user: `root`
-- password: `1234`
-
-You can change that with environment variables:
+The application now requires database environment variables and will not start without them:
 
 ```bash
-export SMS_DB_URL='jdbc:mysql://localhost:3306/sms_db?serverTimezone=UTC'
-export SMS_DB_USER='root'
-export SMS_DB_PASSWORD='1234'
+export SMS_DB_URL='jdbc:mysql://your-db-host:3306/sms_db?serverTimezone=UTC'
+export SMS_DB_USER='your_db_user'
+export SMS_DB_PASSWORD='replace_with_a_strong_password'
+export PORT='9090'
+export JDBC_JAR='/path/to/mysql-connector-j.jar'
 ```
+
+Or create a local `.env` file from the example:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` with your real values. The deploy script will load it automatically.
 
 ### 3. Find your MySQL JDBC jar
 
@@ -122,6 +128,22 @@ Then open:
 http://localhost:9090
 ```
 
+### 6. Simple deploy script
+
+You can also run the app with the included script after setting the required environment variables:
+
+```bash
+chmod +x scripts/deploy.sh
+./scripts/deploy.sh
+```
+
+The script:
+- checks required environment variables
+- checks that the JDBC jar exists
+- compiles the app
+- copies static resources
+- starts the server
+
 ## Role access
 
 ### Admin
@@ -154,15 +176,16 @@ http://localhost:9090
 ## Quick test flow
 
 1. Log in as `admin`.
-2. Open `User Management` and create or edit a user.
-3. Open `Employee Management` and add an employee.
-4. Open `Reports` and generate a report.
-5. Open `Audit History` and confirm actions are recorded.
-6. Log out.
-7. Log in as `officer`.
-8. Register a visitor.
-9. Record visitor entry and exit.
-10. Create and edit an incident.
+2. Change the seeded account passwords.
+3. Open `User Management` and create or edit a user.
+4. Open `Employee Management` and add an employee.
+5. Open `Reports` and generate a report.
+6. Open `Audit History` and confirm actions are recorded.
+7. Log out.
+8. Log in as `officer`.
+9. Register a visitor.
+10. Record visitor entry and exit.
+11. Create and edit an incident.
 
 ## Helpful database checks
 
@@ -185,6 +208,7 @@ SELECT * FROM audit_logs;
 - Sessions are stored in MySQL.
 - Reports can be exported as CSV.
 - Passwords are stored hashed, not in plain text.
+- Database credentials are read from environment variables only.
 
 ## Additional guide
 

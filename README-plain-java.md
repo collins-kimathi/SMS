@@ -3,9 +3,9 @@
 This project is a plain Java + MySQL web app. It does not use Maven, Gradle, Spring Boot, or a separate frontend framework.
 
 The app runs with:
-- a Java HTTP server in [SmsApplication.java](/home/itachi/Documents/projects/SMS/src/main/java/com/uniongroup/sms/SmsApplication.java)
-- static HTML/CSS/JS in [src/main/resources/static](/home/itachi/Documents/projects/SMS/src/main/resources/static)
-- MySQL tables and seed data in [schema.sql](/home/itachi/Documents/projects/SMS/database/schema.sql)
+- a Java HTTP server in `src/main/java/com/uniongroup/sms/SmsApplication.java`
+- static HTML/CSS/JS in `src/main/resources/static`
+- MySQL tables and seed data in `database/schema.sql`
 
 ### Current features
 
@@ -29,29 +29,25 @@ The app runs with:
 
 The schema seeds two accounts:
 
-- `admin / 1234`
-- `officer / 1234`
+- `admin / Admin@Union2026!`
+- `officer / Officer@Union2026!`
 
 Passwords are stored hashed in the database.
+Change these passwords after first login if you deploy the system anywhere public.
 
 ### Database setup
 
 Make sure MySQL is running, then import the schema:
 
 ```bash
-cd /home/itachi/Documents/projects/SMS
 mysql -u root -p < database/schema.sql
 ```
 
-If you kept the earlier local setup, the default MySQL connection used by the app is:
-
-- database: `sms_db`
-- user: `root`
-- password: `1234`
+The application now requires environment variables for database access and will not start without them.
 
 ### JDBC driver
 
-This project uses the system-installed MySQL JDBC jar:
+This project can use a system-installed MySQL JDBC jar such as:
 
 ```bash
 /usr/share/java/mysql-connector-j-9.6.0.jar
@@ -59,22 +55,39 @@ This project uses the system-installed MySQL JDBC jar:
 
 ### Compile
 
-From the project root:
+Set the required environment variables first:
 
 ```bash
-cd /home/itachi/Documents/projects/SMS
+export SMS_DB_URL='jdbc:mysql://localhost:3306/sms_db?serverTimezone=UTC'
+export SMS_DB_USER='root'
+export SMS_DB_PASSWORD='replace_with_a_strong_password'
+export PORT='9090'
+export JDBC_JAR='/usr/share/java/mysql-connector-j-9.6.0.jar'
+```
+
+If you do not want to export them every time, create a local `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` with your actual values. The deploy script will load it automatically.
+
+Then compile from the project root:
+
+```bash
 rm -rf out
 mkdir -p out
-javac -cp /usr/share/java/mysql-connector-j-9.6.0.jar -d out src/main/java/com/uniongroup/sms/SmsApplication.java
+javac -cp "$JDBC_JAR" -d out src/main/java/com/uniongroup/sms/SmsApplication.java
 cp -r src/main/resources/* out/
 ```
 
 ### Run
 
-Run on port `9090`:
+Run on the configured port:
 
 ```bash
-java -cp out:/usr/share/java/mysql-connector-j-9.6.0.jar com.uniongroup.sms.SmsApplication 9090
+java -cp out:"$JDBC_JAR" com.uniongroup.sms.SmsApplication "${PORT:-9090}"
 ```
 
 Then open:
@@ -83,29 +96,33 @@ Then open:
 http://localhost:9090
 ```
 
-### Optional environment variables
+### Deploy script
 
-You can override the database connection with environment variables:
+You can also use the included deploy script:
 
 ```bash
-export SMS_DB_URL='jdbc:mysql://localhost:3306/sms_db?serverTimezone=UTC'
-export SMS_DB_USER='root'
-export SMS_DB_PASSWORD='1234'
+chmod +x scripts/deploy.sh
+./scripts/deploy.sh
 ```
 
-Then run the same `java` command again.
+The script validates:
+
+- `SMS_DB_URL`
+- `SMS_DB_USER`
+- `SMS_DB_PASSWORD`
+- `JDBC_JAR`
 
 ### Main pages
 
-- [login.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/login.html)
-- [dashboard.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/dashboard.html)
-- [visitor-registration.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/visitor-registration.html)
-- [access-control.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/access-control.html)
-- [incident-report.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/incident-report.html)
-- [users.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/users.html)
-- [employees.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/employees.html)
-- [reports.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/reports.html)
-- [audit-history.html](/home/itachi/Documents/projects/SMS/src/main/resources/static/audit-history.html)
+- `login.html`
+- `dashboard.html`
+- `visitor-registration.html`
+- `access-control.html`
+- `incident-report.html`
+- `users.html`
+- `employees.html`
+- `reports.html`
+- `audit-history.html`
 
 ### Role access
 

@@ -74,8 +74,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 INSERT INTO users (username, password, role)
 VALUES
-    ('admin', 'pbkdf2$120000$POOsBFf_peqnlv6u-ModBQ$UWYluVYxOKIOj808UyGZ_7CzpYfNlMfEzKyxFGz-__E', 'Admin'),
-    ('officer', 'pbkdf2$120000$JWjzF0NmFNq2bcaJAfQvUg$zkjF007B602zVLsacle8xUY7PxvNEygvc7Eq4oyBeo4', 'Security')
+    ('admin', 'pbkdf2$120000$kQk15HYP0JxviSD0GV8I4Q$8qNL7LC5mRPUdqsZQMBuY_iU5GDu_klB7CbuNI-RubI', 'Admin'),
+    ('officer', 'pbkdf2$120000$0o9GlaVREIZpnu78VPRlJA$TOkwY37-xQV88QbEdlyoj4foPzmnDCFRfKgmlgd16JI', 'Security')
 ON DUPLICATE KEY UPDATE
     password = VALUES(password),
     role = VALUES(role);

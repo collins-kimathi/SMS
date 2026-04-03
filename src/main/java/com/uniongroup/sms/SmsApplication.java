@@ -37,9 +37,9 @@ public class SmsApplication {
     private static final String STATIC_ROOT = "/static";
     private static final String SESSION_COOKIE = "sms_session";
     private static final long SESSION_TTL_MILLIS = 8L * 60L * 60L * 1000L;
-    private static final String DB_URL = envOrDefault("SMS_DB_URL", "jdbc:mysql://localhost:3306/sms_db?serverTimezone=UTC");
-    private static final String DB_USER = envOrDefault("SMS_DB_USER", "root");
-    private static final String DB_PASSWORD = envOrDefault("SMS_DB_PASSWORD", "1234");
+    private static final String DB_URL = requireEnv("SMS_DB_URL");
+    private static final String DB_USER = requireEnv("SMS_DB_USER");
+    private static final String DB_PASSWORD = requireEnv("SMS_DB_PASSWORD");
     private static final String PASSWORD_PREFIX = "pbkdf2$";
     private static final int PASSWORD_ITERATIONS = 120000;
     private static final int PASSWORD_KEY_LENGTH = 256;
@@ -1846,6 +1846,14 @@ public class SmsApplication {
         String value = System.getenv(key);
         if (value == null || value.isBlank()) {
             return fallback;
+        }
+        return value;
+    }
+
+    private static String requireEnv(String key) {
+        String value = System.getenv(key);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Missing required environment variable: " + key);
         }
         return value;
     }

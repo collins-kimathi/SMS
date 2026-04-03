@@ -61,7 +61,7 @@ function canAccessPage(page, session) {
 
     const role = normalizedRole(session.role);
     const allowedPages = {
-        admin: new Set(["dashboard", "users", "employees", "reports"]),
+        admin: new Set(["dashboard", "users", "employees", "reports", "audit-history"]),
         security: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"]),
         securityofficer: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"])
     };
@@ -99,8 +99,9 @@ function applyRolePermissions() {
     const role = normalizedRole(session.role);
     const restrictedPages = role === "admin"
         ? new Set(["visitor-registration.html", "access-control.html", "incident-report.html"])
-        : new Set(["users.html", "employees.html", "reports.html"]);
+        : new Set(["users.html", "employees.html", "reports.html", "audit-history.html"]);
 
+    // Hide links the current role cannot use so the nav mirrors backend authorization.
     document.querySelectorAll("a[href]").forEach((link) => {
         if (restrictedPages.has(link.getAttribute("href"))) {
             link.classList.add("hidden");
@@ -185,6 +186,16 @@ async function loadVisitorReport(startDate, endDate) {
 
 async function loadAuditReport(startDate, endDate) {
     return api(`/api/reports/audit?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+}
+
+function defaultAuditRange() {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 6);
+    return {
+        startDate: start.toISOString().slice(0, 10),
+        endDate: end.toISOString().slice(0, 10)
+    };
 }
 
 async function renderVisitorTable() {
@@ -416,7 +427,7 @@ async function renderDashboard() {
     await renderAccessTable("dashboardAccessTable", false);
 
     const securityActions = document.querySelectorAll("[href=\"visitor-registration.html\"], [href=\"access-control.html\"], [href=\"incident-report.html\"]");
-    const userActions = document.querySelectorAll("[href=\"users.html\"], [href=\"employees.html\"], [href=\"reports.html\"]");
+    const userActions = document.querySelectorAll("[href=\"users.html\"], [href=\"employees.html\"], [href=\"reports.html\"], [href=\"audit-history.html\"]");
     const role = normalizedRole(session ? session.role : "");
 
     securityActions.forEach((element) => {
@@ -430,6 +441,7 @@ async function renderDashboard() {
             element.classList.add("hidden");
         }
     });
+
 }
 
 async function renderUsersTable() {
@@ -510,6 +522,7 @@ async function renderReportsTable(rows = [], type = "access") {
         return;
     }
 
+    // One renderer supports all report types so the page can switch views without duplicating tables.
     renderReportsHeader(type);
 
     const renderers = {
@@ -560,6 +573,26 @@ async function renderReportsTable(rows = [], type = "access") {
     table.innerHTML = rows.length
         ? rows.map(renderers[type] || renderers.access).join("")
         : tableEmptyRow(colspans[type] || 6, "No records found for the selected date range.");
+}
+
+async function renderAuditTable(rows = []) {
+    const table = document.getElementById("auditTable");
+    if (!table) {
+        return;
+    }
+
+    table.innerHTML = rows.length
+        ? rows.map((entry) => `
+            <tr>
+                <td>${entry.date}</td>
+                <td>${entry.actionType}</td>
+                <td>${entry.entityType}</td>
+                <td>${entry.entityId || "-"}</td>
+                <td>${entry.username}</td>
+                <td>${entry.details}</td>
+            </tr>
+        `).join("")
+        : tableEmptyRow(6, "No audit entries found for the selected date range.");
 }
 
 function bindUserRowActions(users) {
@@ -1031,15 +1064,16 @@ function bindUserForms() {
     editForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const session = getSession();
+        const targetUserId = Number(document.getElementById("editUserId").value);
 
         try {
-            await api("/api/users/update", {
+            const result = await api("/api/users/update", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
                 body: formBody({
-                    targetUserId: document.getElementById("editUserId").value,
+                    targetUserId: String(targetUserId),
                     username: document.getElementById("editUsername").value.trim(),
                     password: document.getElementById("editPassword").value.trim(),
                     role: document.getElementById("editRole").value
@@ -1049,7 +1083,13 @@ function bindUserForms() {
             editForm.reset();
             document.getElementById("editUserId").value = "";
             await renderUsersTable();
-            message("userMessage", "User updated successfully.");
+            message("userMessage", result.message || "User updated successfully.");
+            if (result.sessionRevoked && result.updatedCurrentUser && session && targetUserId === session.userId) {
+                clearSession();
+                window.setTimeout(() => {
+                    window.location.href = "login.html";
+                }, 500);
+            }
         } catch (error) {
             message("userMessage", error.message, true);
         }
@@ -1245,7 +1285,58 @@ function bindReportForm() {
     }
 }
 
+function bindAuditForm() {
+    const form = document.getElementById("auditForm");
+    const exportButton = document.getElementById("exportAuditHistory");
+    if (!form) {
+        return;
+    }
+
+    const range = defaultAuditRange();
+    document.getElementById("auditStartDate").value = range.startDate;
+    document.getElementById("auditEndDate").value = range.endDate;
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const startDate = document.getElementById("auditStartDate").value;
+        const endDate = document.getElementById("auditEndDate").value;
+
+        if (!startDate || !endDate) {
+            message("auditMessage", "Select both start date and end date.", true);
+            return;
+        }
+
+        if (startDate > endDate) {
+            message("auditMessage", "Start date cannot be after end date.", true);
+            return;
+        }
+
+        try {
+            const rows = await loadAuditReport(startDate, endDate);
+            await renderAuditTable(rows);
+            message("auditMessage", `Audit history loaded successfully. ${rows.length} record(s) found.`);
+        } catch (error) {
+            message("auditMessage", error.message, true);
+        }
+    });
+
+    if (exportButton) {
+        exportButton.addEventListener("click", () => {
+            const startDate = document.getElementById("auditStartDate").value;
+            const endDate = document.getElementById("auditEndDate").value;
+
+            if (!startDate || !endDate) {
+                message("auditMessage", "Select both start date and end date before exporting.", true);
+                return;
+            }
+
+            window.location.href = `/api/reports/export?type=audit&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+        });
+    }
+}
+
 async function initializePage(page) {
+    // Page-specific setup is centralized here so each HTML file only needs a data-page attribute.
     switch (page) {
         case "dashboard":
             await renderDashboard();
@@ -1278,6 +1369,11 @@ async function initializePage(page) {
         case "reports":
             bindReportForm();
             await renderReportsTable([], "access");
+            break;
+        case "audit-history":
+            bindAuditForm();
+            await renderAuditTable([]);
+            document.getElementById("auditForm").dispatchEvent(new Event("submit"));
             break;
         case "login":
             bindLogin();
@@ -1314,7 +1410,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         applyRolePermissions();
         await initializePage(page);
     } catch (error) {
-        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : page === "employees" ? "employeeMessage" : page === "reports" ? "reportMessage" : null;
+        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : page === "employees" ? "employeeMessage" : page === "reports" ? "reportMessage" : page === "audit-history" ? "auditMessage" : null;
         if (targetId) {
             message(targetId, error.message || "Failed to load data.", true);
         }
