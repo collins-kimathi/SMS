@@ -77,11 +77,6 @@ function protectRoute(page) {
         return false;
     }
 
-    if (page === "login" && session) {
-        window.location.href = "dashboard.html";
-        return false;
-    }
-
     if (session && !canAccessPage(page, session)) {
         window.location.href = "dashboard.html";
         return false;
@@ -1380,7 +1375,7 @@ async function initializePage(page) {
             break;
         case "index":
             window.setTimeout(() => {
-                window.location.href = getSession() ? "dashboard.html" : "login.html";
+                window.location.href = "login.html";
             }, 200);
             break;
         default:
