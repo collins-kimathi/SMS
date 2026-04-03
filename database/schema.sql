@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS visitors (
     visitor_id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    national_id VARCHAR(50) NOT NULL UNIQUE,
+    national_id VARCHAR(50) NOT NULL UNIQUE,x
     phone_number VARCHAR(20) NOT NULL,
     purpose_of_visit VARCHAR(255) NOT NULL
 );
@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS incidents (
     reported_at DATETIME NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
+
+INSERT INTO users (username, password, role)
+VALUES
+    ('admin', '1234', 'Admin'),
+    ('officer', '1234', 'Security')
+ON DUPLICATE KEY UPDATE
+    password = VALUES(password),
+    role = VALUES(role);
 
 INSERT INTO employees (name, department, phone_number)
 SELECT 'Mary Wanjiku', 'Operations', '+254700111222'

@@ -69,7 +69,7 @@ function canAccessPage(page, session) {
 
     const role = normalizedRole(session.role);
     const allowedPages = {
-        admin: new Set(["dashboard", "users", "reports"]),
+        admin: new Set(["dashboard", "users"]),
         security: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"]),
         securityofficer: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"])
     };
@@ -107,7 +107,7 @@ function applyRolePermissions() {
     const role = normalizedRole(session.role);
     const restrictedPages = role === "admin"
         ? new Set(["visitor-registration.html", "access-control.html", "incident-report.html"])
-        : new Set(["users.html", "reports.html"]);
+        : new Set(["users.html"]);
 
     document.querySelectorAll("a[href]").forEach((link) => {
         if (restrictedPages.has(link.getAttribute("href"))) {
@@ -164,11 +164,6 @@ async function loadIncidents() {
 async function loadUsers() {
     const session = getSession();
     return api(`/api/users?userId=${encodeURIComponent(session ? session.userId : "")}`);
-}
-
-async function loadAccessReport(startDate, endDate) {
-    const session = getSession();
-    return api(`/api/reports/access?userId=${encodeURIComponent(session ? session.userId : "")}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
 
 async function renderVisitorTable() {
@@ -328,7 +323,7 @@ async function renderDashboard() {
     await renderAccessTable("dashboardAccessTable");
 
     const securityActions = document.querySelectorAll("[href=\"visitor-registration.html\"], [href=\"access-control.html\"], [href=\"incident-report.html\"]");
-    const userActions = document.querySelectorAll("[href=\"users.html\"], [href=\"reports.html\"]");
+    const userActions = document.querySelectorAll("[href=\"users.html\"]");
     const role = normalizedRole(session ? session.role : "");
 
     securityActions.forEach((element) => {
@@ -370,26 +365,6 @@ async function renderUsersTable() {
 
     bindUserRowActions(users);
     return users;
-}
-
-async function renderReportsTable(rows = []) {
-    const table = document.getElementById("reportsTable");
-    if (!table) {
-        return;
-    }
-
-    table.innerHTML = rows.length
-        ? rows.map((log) => `
-            <tr>
-                <td>${log.date}</td>
-                <td>${log.visitorName}</td>
-                <td>${log.host}</td>
-                <td>${String(log.entryTime).slice(0, 5)}</td>
-                <td>${log.exitTime ? String(log.exitTime).slice(0, 5) : "Still in building"}</td>
-                <td>${log.recordedBy}</td>
-            </tr>
-        `).join("")
-        : tableEmptyRow(6, "No records found for the selected date range.");
 }
 
 function bindUserRowActions(users) {
@@ -455,7 +430,7 @@ function bindLogin() {
             return;
         }
 
-        try {
+        try {xuuel
             const session = await api("/api/login", {
                 method: "POST",
                 headers: {
@@ -664,37 +639,6 @@ function bindUserForms() {
     });
 }
 
-function bindReportForm() {
-    const form = document.getElementById("reportForm");
-    if (!form) {
-        return;
-    }
-
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const startDate = document.getElementById("reportStartDate").value;
-        const endDate = document.getElementById("reportEndDate").value;
-
-        if (!startDate || !endDate) {
-            message("reportMessage", "Select both start date and end date.", true);
-            return;
-        }
-
-        if (startDate > endDate) {
-            message("reportMessage", "Start date cannot be after end date.", true);
-            return;
-        }
-
-        try {
-            const rows = await loadAccessReport(startDate, endDate);
-            await renderReportsTable(rows);
-            message("reportMessage", `Report generated successfully. ${rows.length} record(s) found.`);
-        } catch (error) {
-            message("reportMessage", error.message, true);
-        }
-    });
-}
-
 async function initializePage(page) {
     switch (page) {
         case "dashboard":
@@ -716,10 +660,6 @@ async function initializePage(page) {
         case "users":
             bindUserForms();
             await renderUsersTable();
-            break;
-        case "reports":
-            bindReportForm();
-            await renderReportsTable([]);
             break;
         case "login":
             bindLogin();
@@ -747,7 +687,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
         await initializePage(page);
     } catch (error) {
-        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : page === "reports" ? "reportMessage" : null;
+        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : null;
         if (targetId) {
             message(targetId, error.message || "Failed to load data.", true);
         }
