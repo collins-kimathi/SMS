@@ -257,6 +257,7 @@ public class SmsApplication {
                     return;
                 }
 
+                // Upgrade legacy plain-text rows as soon as a valid login proves ownership.
                 upgradePlainTextPasswordIfNeeded(connection, resultSet.getInt("user_id"), storedPassword);
 
                 SessionInfo session = createSession(
@@ -1292,6 +1293,7 @@ public class SmsApplication {
 
     private static void initializeDatabaseState() throws IOException {
         try (Connection connection = getConnection()) {
+            // Keep older databases compatible with the current code without requiring a manual reset.
             ensureColumnExists(connection, "incidents", "incident_type",
                 "ALTER TABLE incidents ADD COLUMN incident_type VARCHAR(50) NOT NULL DEFAULT 'Security'");
             ensureColumnExists(connection, "incidents", "location",
@@ -1459,10 +1461,7 @@ public class SmsApplication {
     }
 
     private static String buildCsvReport(String type, String startDate, String endDate) throws SQLException {
-        Map<String, String> query = new LinkedHashMap<>();
-        query.put("startDate", startDate);
-        query.put("endDate", endDate);
-
+        // Reuse the same date-range semantics as the on-screen reports so exports match what users see.
         List<String[]> rows = new ArrayList<>();
         if ("access".equals(type)) {
             rows.add(new String[] {"Date", "Visitor", "Host", "Entry", "Exit", "Recorded By"});
@@ -1668,6 +1667,7 @@ public class SmsApplication {
             return null;
         }
 
+        // Sessions are loaded from MySQL so restarts do not rely on an in-memory Java map.
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(
                  "SELECT session_id, user_id, username, role, expires_at FROM sessions WHERE session_id = ?")) {

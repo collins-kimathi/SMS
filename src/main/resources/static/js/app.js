@@ -101,6 +101,7 @@ function applyRolePermissions() {
         ? new Set(["visitor-registration.html", "access-control.html", "incident-report.html"])
         : new Set(["users.html", "employees.html", "reports.html", "audit-history.html"]);
 
+    // Hide links the current role cannot use so the nav mirrors backend authorization.
     document.querySelectorAll("a[href]").forEach((link) => {
         if (restrictedPages.has(link.getAttribute("href"))) {
             link.classList.add("hidden");
@@ -521,6 +522,7 @@ async function renderReportsTable(rows = [], type = "access") {
         return;
     }
 
+    // One renderer supports all report types so the page can switch views without duplicating tables.
     renderReportsHeader(type);
 
     const renderers = {
@@ -1334,6 +1336,7 @@ function bindAuditForm() {
 }
 
 async function initializePage(page) {
+    // Page-specific setup is centralized here so each HTML file only needs a data-page attribute.
     switch (page) {
         case "dashboard":
             await renderDashboard();
