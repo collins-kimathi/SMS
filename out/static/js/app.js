@@ -1,4 +1,5 @@
 let currentSession = null;
+let incidentCache = [];
 
 function getSession() {
     return currentSession;
@@ -60,7 +61,7 @@ function canAccessPage(page, session) {
 
     const role = normalizedRole(session.role);
     const allowedPages = {
-        admin: new Set(["dashboard", "users", "reports"]),
+        admin: new Set(["dashboard", "users", "employees", "reports"]),
         security: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"]),
         securityofficer: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"])
     };
@@ -98,7 +99,7 @@ function applyRolePermissions() {
     const role = normalizedRole(session.role);
     const restrictedPages = role === "admin"
         ? new Set(["visitor-registration.html", "access-control.html", "incident-report.html"])
-        : new Set(["users.html", "reports.html"]);
+        : new Set(["users.html", "employees.html", "reports.html"]);
 
     document.querySelectorAll("a[href]").forEach((link) => {
         if (restrictedPages.has(link.getAttribute("href"))) {
@@ -164,6 +165,10 @@ async function loadIncidents() {
 
 async function loadUsers() {
     return api("/api/users");
+}
+
+async function loadEmployeeDirectory() {
+    return api("/api/employees");
 }
 
 async function loadAccessReport(startDate, endDate) {
@@ -257,19 +262,56 @@ async function renderIncidentTable() {
     }
 
     const incidents = await loadIncidents();
+    incidentCache = incidents;
+    return renderIncidentRows(incidents);
+}
+
+function renderIncidentRows(incidents) {
+    const table = document.getElementById("incidentTable");
+    if (!table) {
+        return [];
+    }
+
     table.innerHTML = incidents.length
         ? incidents.map((incident) => `
             <tr>
                 <td>${incident.date}</td>
                 <td>${incident.title}</td>
+                <td>${incident.incidentType}</td>
+                <td>${incident.location}</td>
                 <td>${incident.severity}</td>
+                <td>${incident.status}</td>
                 <td>${incident.reportedBy}</td>
+                <td>${incident.actionTaken || "-"}</td>
                 <td>${incident.description}</td>
+                <td>
+                    <div class="inline-actions">
+                        <button type="button" class="btn btn-secondary btn-small" data-edit-incident="${incident.id}">Edit</button>
+                    </div>
+                </td>
             </tr>
         `).join("")
-        : tableEmptyRow(5, "No incidents logged yet.");
+        : tableEmptyRow(10, "No incidents logged yet.");
 
+    bindIncidentRowActions(incidents);
     return incidents;
+}
+
+function filterIncidents() {
+    const status = (document.getElementById("incidentFilterStatus")?.value || "").trim();
+    const date = (document.getElementById("incidentFilterDate")?.value || "").trim();
+
+    const filteredIncidents = incidentCache.filter((incident) => {
+        const statusMatch = !status || incident.status === status;
+        const dateMatch = !date || incident.date === date;
+        return statusMatch && dateMatch;
+    });
+
+    renderIncidentRows(filteredIncidents);
+
+    if (status || date) {
+        message("incidentMessage", `Filter applied. ${filteredIncidents.length} incident(s) matched.`);
+    }
 }
 
 async function renderDashboard() {
@@ -317,7 +359,8 @@ async function renderDashboard() {
             ? recent.map((incident) => `
                 <div class="record-item">
                     <strong>${incident.title}</strong>
-                    <p>${incident.severity} severity</p>
+                    <p>${incident.incidentType} at ${incident.location}</p>
+                    <p>${incident.severity} severity, ${incident.status}</p>
                     <p>${incident.date} by ${incident.reportedBy}</p>
                 </div>
             `).join("")
@@ -327,7 +370,7 @@ async function renderDashboard() {
     await renderAccessTable("dashboardAccessTable");
 
     const securityActions = document.querySelectorAll("[href=\"visitor-registration.html\"], [href=\"access-control.html\"], [href=\"incident-report.html\"]");
-    const userActions = document.querySelectorAll("[href=\"users.html\"], [href=\"reports.html\"]");
+    const userActions = document.querySelectorAll("[href=\"users.html\"], [href=\"employees.html\"], [href=\"reports.html\"]");
     const role = normalizedRole(session ? session.role : "");
 
     securityActions.forEach((element) => {
@@ -369,6 +412,34 @@ async function renderUsersTable() {
 
     bindUserRowActions(users);
     return users;
+}
+
+async function renderEmployeesTable() {
+    const table = document.getElementById("employeesTable");
+    if (!table) {
+        return [];
+    }
+
+    const employees = await loadEmployeeDirectory();
+    table.innerHTML = employees.length
+        ? employees.map((employee) => `
+            <tr>
+                <td>${employee.id}</td>
+                <td>${employee.name}</td>
+                <td>${employee.department}</td>
+                <td>${employee.phoneNumber || "-"}</td>
+                <td>
+                    <div class="inline-actions">
+                        <button type="button" class="btn btn-secondary btn-small" data-edit-employee="${employee.id}">Edit</button>
+                        <button type="button" class="btn btn-danger btn-small" data-delete-employee="${employee.id}">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `).join("")
+        : tableEmptyRow(5, "No employees found.");
+
+    bindEmployeeRowActions(employees);
+    return employees;
 }
 
 async function renderReportsTable(rows = []) {
@@ -432,6 +503,51 @@ function bindUserRowActions(users) {
                 message("userMessage", "User deleted successfully.");
             } catch (error) {
                 message("userMessage", error.message, true);
+            }
+        });
+    });
+}
+
+function bindEmployeeRowActions(employees) {
+    document.querySelectorAll("[data-edit-employee]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const employeeId = Number(button.getAttribute("data-edit-employee"));
+            const employee = employees.find((item) => item.id === employeeId);
+            if (!employee) {
+                return;
+            }
+
+            document.getElementById("editEmployeeId").value = String(employee.id);
+            document.getElementById("editEmployeeName").value = employee.name;
+            document.getElementById("editEmployeeDepartment").value = employee.department;
+            document.getElementById("editEmployeePhone").value = employee.phoneNumber || "";
+            message("employeeMessage", `Editing ${employee.name}. Update the fields and save changes.`);
+        });
+    });
+
+    document.querySelectorAll("[data-delete-employee]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const employeeId = button.getAttribute("data-delete-employee");
+
+            if (!window.confirm("Delete this employee record?")) {
+                return;
+            }
+
+            try {
+                await api("/api/employees/delete", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: formBody({
+                        employeeId
+                    })
+                });
+
+                await renderEmployeesTable();
+                message("employeeMessage", "Employee deleted successfully.");
+            } catch (error) {
+                message("employeeMessage", error.message, true);
             }
         });
     });
@@ -582,7 +698,11 @@ function bindIncidentForm() {
                 },
                 body: formBody({
                     title: document.getElementById("title").value.trim(),
+                    incidentType: document.getElementById("incidentType").value,
+                    location: document.getElementById("location").value.trim(),
                     severity: document.getElementById("severity").value,
+                    status: document.getElementById("status").value,
+                    actionTaken: document.getElementById("actionTaken").value.trim(),
                     description: document.getElementById("description").value.trim()
                 })
             });
@@ -594,6 +714,92 @@ function bindIncidentForm() {
             message("incidentMessage", error.message, true);
         }
     });
+}
+
+function bindIncidentRowActions(incidents) {
+    document.querySelectorAll("[data-edit-incident]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const incidentId = Number(button.getAttribute("data-edit-incident"));
+            const incident = incidents.find((item) => item.id === incidentId);
+            if (!incident) {
+                return;
+            }
+
+            document.getElementById("editIncidentId").value = String(incident.id);
+            document.getElementById("editTitle").value = incident.title;
+            document.getElementById("editIncidentType").value = incident.incidentType;
+            document.getElementById("editLocation").value = incident.location;
+            document.getElementById("editSeverity").value = incident.severity;
+            document.getElementById("editStatus").value = incident.status;
+            document.getElementById("editDescription").value = incident.description;
+            document.getElementById("editActionTaken").value = incident.actionTaken || "";
+            message("incidentMessage", `Editing incident #${incident.id}. Update the fields and save your changes.`);
+            document.getElementById("incidentEditForm").scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+    });
+}
+
+function bindIncidentEditForm() {
+    const form = document.getElementById("incidentEditForm");
+    if (!form) {
+        return;
+    }
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        if (!document.getElementById("editIncidentId").value) {
+            message("incidentMessage", "Select an incident from the log before saving changes.", true);
+            return;
+        }
+
+        try {
+            await api("/api/incidents/update", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formBody({
+                    incidentId: document.getElementById("editIncidentId").value,
+                    title: document.getElementById("editTitle").value.trim(),
+                    incidentType: document.getElementById("editIncidentType").value,
+                    location: document.getElementById("editLocation").value.trim(),
+                    severity: document.getElementById("editSeverity").value,
+                    status: document.getElementById("editStatus").value,
+                    actionTaken: document.getElementById("editActionTaken").value.trim(),
+                    description: document.getElementById("editDescription").value.trim()
+                })
+            });
+
+            form.reset();
+            document.getElementById("editIncidentId").value = "";
+            await renderIncidentTable();
+            message("incidentMessage", "Incident updated successfully.");
+        } catch (error) {
+            message("incidentMessage", error.message, true);
+        }
+    });
+}
+
+function bindIncidentFilters() {
+    const form = document.getElementById("incidentFilterForm");
+    const resetButton = document.getElementById("resetIncidentFilters");
+    if (!form) {
+        return;
+    }
+
+    form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        filterIncidents();
+    });
+
+    if (resetButton) {
+        resetButton.addEventListener("click", () => {
+            form.reset();
+            renderIncidentRows(incidentCache);
+            message("incidentMessage", "Incident filters cleared.");
+        });
+    }
 }
 
 function bindUserForms() {
@@ -656,6 +862,65 @@ function bindUserForms() {
     });
 }
 
+function bindEmployeeForms() {
+    const createForm = document.getElementById("employeeCreateForm");
+    const editForm = document.getElementById("employeeEditForm");
+    if (!createForm || !editForm) {
+        return;
+    }
+
+    createForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        try {
+            await api("/api/employees/create", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formBody({
+                    name: document.getElementById("employeeName").value.trim(),
+                    department: document.getElementById("employeeDepartment").value.trim(),
+                    phoneNumber: document.getElementById("employeePhone").value.trim()
+                })
+            });
+
+            createForm.reset();
+            await renderEmployeesTable();
+            message("employeeMessage", "Employee created successfully.");
+        } catch (error) {
+            message("employeeMessage", error.message, true);
+        }
+    });
+
+    editForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        try {
+            await api("/api/employees/update", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formBody({
+                    employeeId: document.getElementById("editEmployeeId").value,
+                    name: document.getElementById("editEmployeeName").value.trim(),
+                    department: document.getElementById("editEmployeeDepartment").value.trim(),
+                    phoneNumber: document.getElementById("editEmployeePhone").value.trim()
+                })
+            });
+
+            editForm.reset();
+            document.getElementById("editEmployeeId").value = "";
+            await renderEmployeesTable();
+            await renderAccessSelects();
+            message("employeeMessage", "Employee updated successfully.");
+        } catch (error) {
+            message("employeeMessage", error.message, true);
+        }
+    });
+}
+
 function bindReportForm() {
     const form = document.getElementById("reportForm");
     if (!form) {
@@ -703,11 +968,17 @@ async function initializePage(page) {
             break;
         case "incident-report":
             bindIncidentForm();
+            bindIncidentEditForm();
+            bindIncidentFilters();
             await renderIncidentTable();
             break;
         case "users":
             bindUserForms();
             await renderUsersTable();
+            break;
+        case "employees":
+            bindEmployeeForms();
+            await renderEmployeesTable();
             break;
         case "reports":
             bindReportForm();
@@ -748,7 +1019,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         applyRolePermissions();
         await initializePage(page);
     } catch (error) {
-        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : page === "reports" ? "reportMessage" : null;
+        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : page === "employees" ? "employeeMessage" : page === "reports" ? "reportMessage" : null;
         if (targetId) {
             message(targetId, error.message || "Failed to load data.", true);
         }
