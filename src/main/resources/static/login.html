@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body data-page="login">
+    <!-- Public authentication screen used before any role-specific routing begins. -->
     <div class="center-layout page-shell">
         <div class="glass-panel animate-fade auth-card">
             <p class="eyebrow">Security Management System</p>
@@ -18,6 +19,7 @@
                 Session ready.
             </div>
 
+            <!-- Login form submits to the Java backend, which creates the server-side session. -->
             <form class="stacked-form" id="loginForm">
                 <div class="form-group">
                     <label for="username">Username</label>

@@ -1,5 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap");
 
+/* Global design tokens shared across every page. */
 :root {
     --bg-dark: #09111f;
     --bg-card: rgba(18, 27, 46, 0.74);
@@ -13,6 +14,7 @@
     --glass-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
 }
 
+/* Base reset and typography defaults. */
 * {
     box-sizing: border-box;
     margin: 0;
@@ -58,6 +60,7 @@ p {
     line-height: 1.65;
 }
 
+/* Top navigation used by all authenticated pages. */
 nav {
     position: sticky;
     top: 0;
@@ -106,6 +109,7 @@ nav {
     padding-bottom: 2rem;
 }
 
+/* Shared glass-style panels and dashboard layouts. */
 .center-layout {
     min-height: 100vh;
     display: flex;
@@ -174,6 +178,7 @@ nav {
     margin-bottom: 1.2rem;
 }
 
+/* Shared form controls and button styles. */
 .stacked-form {
     display: grid;
     gap: 1rem;
@@ -256,6 +261,7 @@ textarea:focus {
     display: none;
 }
 
+/* Shared feedback, table, and utility styling. */
 .alert {
     padding: 1rem 1.1rem;
     border-radius: 16px;

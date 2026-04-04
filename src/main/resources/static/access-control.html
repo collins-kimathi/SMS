@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body data-page="access-control">
+    <!-- Access control page for recording visitor entry, exit, and later corrections. -->
     <nav>
         <h2>Union <span class="brand-accent">Security</span></h2>
         <div class="nav-links">
@@ -24,6 +25,7 @@
     <div class="container animate-fade page-shell">
         <div id="accessMessage" class="alert alert-success hidden"></div>
 
+        <!-- Entry and exit are separated so officers can process traffic quickly at the desk. -->
         <div class="dashboard-grid split-grid">
             <div class="glass-panel">
                 <h3>Record Visitor Entry</h3>
@@ -96,6 +98,7 @@
         </div>
 
         <div class="glass-panel">
+            <!-- Access log rows are editable because guards may need to correct times after the fact. -->
             <h3>Access Logs</h3>
             <table>
                 <thead>

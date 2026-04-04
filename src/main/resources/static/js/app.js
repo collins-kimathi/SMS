@@ -1,6 +1,7 @@
 let currentSession = null;
 let incidentCache = [];
 
+// Browser-side session cache so each page can make role decisions without refetching constantly.
 function getSession() {
     return currentSession;
 }
@@ -13,6 +14,7 @@ function clearSession() {
     currentSession = null;
 }
 
+// Shared flash-message helper used across forms and management pages.
 function message(elementId, text, isError = false) {
     const element = document.getElementById(elementId);
     if (!element) {
@@ -49,6 +51,7 @@ function normalizedRole(role) {
         .replace(/\s+/g, "");
 }
 
+// Route guard rules for each role. The backend still enforces these permissions too.
 function canAccessPage(page, session) {
     const publicPages = new Set(["login", "index"]);
     if (publicPages.has(page)) {
@@ -85,6 +88,7 @@ function protectRoute(page) {
     return true;
 }
 
+// Keep the navigation aligned with the current role so users only see allowed pages.
 function applyRolePermissions() {
     const session = getSession();
     if (!session) {
@@ -119,6 +123,7 @@ function bindLogout() {
     });
 }
 
+// Generic fetch wrapper for all backend API requests.
 async function api(path, options = {}) {
     const response = await fetch(path, {
         credentials: "same-origin",
@@ -142,6 +147,10 @@ async function api(path, options = {}) {
 function formBody(values) {
     return new URLSearchParams(values);
 }
+
+// ---------------------------------------------------------------------
+// Data loading helpers
+// ---------------------------------------------------------------------
 
 async function loadVisitors() {
     return api("/api/visitors");
@@ -192,6 +201,10 @@ function defaultAuditRange() {
         endDate: end.toISOString().slice(0, 10)
     };
 }
+
+// ---------------------------------------------------------------------
+// Table rendering helpers
+// ---------------------------------------------------------------------
 
 async function renderVisitorTable() {
     const table = document.getElementById("visitorTable");
@@ -511,6 +524,7 @@ function renderReportsHeader(type) {
     head.innerHTML = `<tr>${(headings[type] || headings.access).map((label) => `<th>${label}</th>`).join("")}</tr>`;
 }
 
+// Reports share one renderer so each report type follows the same table workflow.
 async function renderReportsTable(rows = [], type = "access") {
     const table = document.getElementById("reportsTable");
     if (!table) {
@@ -590,6 +604,9 @@ async function renderAuditTable(rows = []) {
         : tableEmptyRow(6, "No audit entries found for the selected date range.");
 }
 
+// ---------------------------------------------------------------------
+// Row action bindings for edit/delete flows
+// ---------------------------------------------------------------------
 function bindUserRowActions(users) {
     document.querySelectorAll("[data-edit-user]").forEach((button) => {
         button.addEventListener("click", () => {
@@ -727,6 +744,9 @@ function bindEmployeeRowActions(employees) {
     });
 }
 
+// ---------------------------------------------------------------------
+// Form bindings for each page
+// ---------------------------------------------------------------------
 function bindLogin() {
     const form = document.getElementById("loginForm");
     if (!form) {
@@ -1221,6 +1241,7 @@ function bindEmployeeForms() {
     });
 }
 
+// Reports and audit screens share the same date-driven pattern, but point to different endpoints.
 function bindReportForm() {
     const form = document.getElementById("reportForm");
     const exportButton = document.getElementById("exportReport");

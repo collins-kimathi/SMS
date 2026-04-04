@@ -33,6 +33,7 @@ import javax.crypto.spec.PBEKeySpec;
 
 public class SmsApplication {
 
+    // Core application settings, security constants, and required database configuration.
     private static final int DEFAULT_PORT = 8080;
     private static final String STATIC_ROOT = "/static";
     private static final String SESSION_COOKIE = "sms_session";
@@ -57,6 +58,7 @@ public class SmsApplication {
         CONTENT_TYPES.put("ico", "image/x-icon");
     }
 
+    // Application entry point: verify startup state, then start the built-in HTTP server.
     public static void main(String[] args) throws IOException {
         int port = resolvePort(args);
         initializeDatabaseState();
@@ -69,6 +71,7 @@ public class SmsApplication {
         System.out.println("Database URL: " + DB_URL);
     }
 
+    // First routing layer: decide between API traffic and static frontend files.
     private static void handleRequest(HttpExchange exchange) throws IOException {
         addCorsHeaders(exchange);
 
@@ -91,6 +94,7 @@ public class SmsApplication {
         serveStaticResource(exchange, path);
     }
 
+    // API router: map each /api path to a dedicated handler method below.
     private static void handleApiRequest(HttpExchange exchange, String path) throws IOException {
         try {
             switch (path) {
@@ -230,6 +234,10 @@ public class SmsApplication {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Authentication and session endpoints
+    // ---------------------------------------------------------------------
+
     private static void handleLogin(HttpExchange exchange) throws IOException, SQLException {
         Map<String, String> form = parseFormBody(exchange);
         String username = trim(form.get("username"));
@@ -297,6 +305,10 @@ public class SmsApplication {
         clearSessionCookie(exchange);
         sendJson(exchange, 200, "{\"message\":\"Logged out successfully\"}");
     }
+
+    // ---------------------------------------------------------------------
+    // Visitor management endpoints
+    // ---------------------------------------------------------------------
 
     private static void handleVisitorsList(HttpExchange exchange) throws IOException, SQLException {
         requireAuthenticated(exchange);
@@ -423,6 +435,9 @@ public class SmsApplication {
         sendJson(exchange, 200, "{\"message\":\"Visitor deleted successfully\"}");
     }
 
+    // ---------------------------------------------------------------------
+    // Employee management endpoints
+    // ---------------------------------------------------------------------
     private static void handleEmployeesList(HttpExchange exchange) throws IOException, SQLException {
         requireAuthenticated(exchange);
         String sql = "SELECT employee_id, name, department, phone_number FROM employees ORDER BY name ASC";
@@ -532,6 +547,9 @@ public class SmsApplication {
         sendJson(exchange, 200, "{\"message\":\"Employee deleted successfully\"}");
     }
 
+    // ---------------------------------------------------------------------
+    // Access control endpoints
+    // ---------------------------------------------------------------------
     private static void handleAccessLogsList(HttpExchange exchange) throws IOException, SQLException {
         requireAuthenticated(exchange);
         String sql = ""
@@ -683,6 +701,9 @@ public class SmsApplication {
         sendJson(exchange, 200, "{\"message\":\"Access record deleted successfully\"}");
     }
 
+    // ---------------------------------------------------------------------
+    // Incident management endpoints
+    // ---------------------------------------------------------------------
     private static void handleIncidentsList(HttpExchange exchange) throws IOException, SQLException {
         requireAuthenticated(exchange);
         String sql = ""
@@ -799,6 +820,9 @@ public class SmsApplication {
         sendJson(exchange, 200, "{\"message\":\"Incident updated successfully\"}");
     }
 
+    // ---------------------------------------------------------------------
+    // User management endpoints
+    // ---------------------------------------------------------------------
     private static void handleUsersList(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = requireAuthenticated(exchange);
         String sql = "SELECT user_id, username, role FROM users ORDER BY user_id ASC";
@@ -964,6 +988,9 @@ public class SmsApplication {
         sendJson(exchange, 200, "{\"message\":\"User deleted successfully\"}");
     }
 
+    // ---------------------------------------------------------------------
+    // Reporting and CSV export endpoints
+    // ---------------------------------------------------------------------
     private static void handleAccessReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = requireAuthenticated(exchange);
         requireAdmin(session);
@@ -1167,6 +1194,9 @@ public class SmsApplication {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Shared validation, authorization, and audit helpers
+    // ---------------------------------------------------------------------
     private static boolean visitorExists(Connection connection, String nationalId) throws SQLException {
         String sql = "SELECT 1 FROM visitors WHERE national_id = ? LIMIT 1";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -1291,6 +1321,9 @@ public class SmsApplication {
         return trimmedValue;
     }
 
+    // ---------------------------------------------------------------------
+    // Startup database preparation and compatibility checks
+    // ---------------------------------------------------------------------
     private static void initializeDatabaseState() throws IOException {
         try (Connection connection = getConnection()) {
             // Keep older databases compatible with the current code without requiring a manual reset.
@@ -1383,6 +1416,9 @@ public class SmsApplication {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Password hashing and verification
+    // ---------------------------------------------------------------------
     private static boolean isHashedPassword(String password) {
         return password != null && password.startsWith(PASSWORD_PREFIX);
     }
@@ -1460,6 +1496,7 @@ public class SmsApplication {
         return Base64.getUrlDecoder().decode(value + "=".repeat(paddingNeeded));
     }
 
+    // Reuse one exporter so downloads and on-screen reports stay driven by the same filters.
     private static String buildCsvReport(String type, String startDate, String endDate) throws SQLException {
         // Reuse the same date-range semantics as the on-screen reports so exports match what users see.
         List<String[]> rows = new ArrayList<>();
@@ -1571,6 +1608,9 @@ public class SmsApplication {
         return builder.toString();
     }
 
+    // ---------------------------------------------------------------------
+    // HTTP parsing, session lookup, and response helpers
+    // ---------------------------------------------------------------------
     private static void serveStaticResource(HttpExchange exchange, String path) throws IOException {
         String resourcePath = STATIC_ROOT + path;
 
@@ -1696,6 +1736,7 @@ public class SmsApplication {
         }
     }
 
+    // Persist sessions in MySQL so the backend remains the source of truth for logged-in users.
     private static SessionInfo createSession(Connection connection, int userId, String username, String role) throws SQLException {
         String sessionId = generateSessionId();
         SessionInfo session = new SessionInfo(sessionId, userId, username, role, System.currentTimeMillis() + SESSION_TTL_MILLIS);
@@ -1866,6 +1907,7 @@ public class SmsApplication {
         return value == null ? fallback : value;
     }
 
+    // This app writes JSON manually, so values must be escaped before they are inserted into responses.
     private static String escapeJson(String value) {
         if (value == null) {
             return "";
@@ -1897,6 +1939,7 @@ public class SmsApplication {
         return builder.toString();
     }
 
+    // Lightweight session model passed around after a request is authenticated.
     private static final class SessionInfo {
         private final String sessionId;
         private final int userId;
@@ -1913,6 +1956,7 @@ public class SmsApplication {
         }
     }
 
+    // Used to stop protected requests before they reach feature handlers.
     private static final class UnauthorizedException extends RuntimeException {
         private UnauthorizedException(String message) {
             super(message);
