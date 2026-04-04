@@ -111,15 +111,14 @@ Examples:
 Replace `/path/to/mysql-connector-j.jar` with your actual jar path:
 
 ```bash
-mkdir -p out
-javac -cp /path/to/mysql-connector-j.jar -d out src/main/java/com/uniongroup/sms/SmsApplication.java
-cp -r src/main/resources/* out/
+mkdir -p target/classes
+javac -cp /path/to/mysql-connector-j.jar -d target/classes src/main/java/com/uniongroup/sms/*.java
 ```
 
 ### 5. Run
 
 ```bash
-java -cp out:/path/to/mysql-connector-j.jar com.uniongroup.sms.SmsApplication 9090
+java -cp target/classes:/path/to/mysql-connector-j.jar com.uniongroup.sms.SmsApplication 9090
 ```
 
 Then open:
@@ -141,8 +140,9 @@ The script:
 - checks required environment variables
 - checks that the JDBC jar exists
 - compiles the app
-- copies static resources
 - starts the server
+
+For local development, the frontend is served directly from `src/main/resources/static`, so no `out/` folder is required.
 
 ## Role access
 
@@ -209,6 +209,8 @@ SELECT * FROM audit_logs;
 - Reports can be exported as CSV.
 - Passwords are stored hashed, not in plain text.
 - Database credentials are read from environment variables only.
+- Java classes are compiled into `target/classes`.
+- Frontend source files are served directly from `src/main/resources/static` during local runs.
 
 ## Additional guide
 

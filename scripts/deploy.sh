@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="$ROOT_DIR/out"
+OUT_DIR="$ROOT_DIR/target/classes"
 MAIN_CLASS="com.uniongroup.sms.SmsApplication"
 DEFAULT_JAR="/usr/share/java/mysql-connector-j-9.6.0.jar"
 
@@ -38,7 +38,6 @@ fi
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-javac -cp "$JDBC_JAR" -d "$OUT_DIR" "$ROOT_DIR/src/main/java/com/uniongroup/sms/SmsApplication.java"
-cp -r "$ROOT_DIR/src/main/resources/"* "$OUT_DIR/"
+javac -cp "$JDBC_JAR" -d "$OUT_DIR" "$ROOT_DIR"/src/main/java/com/uniongroup/sms/*.java
 
 exec java -cp "$OUT_DIR:$JDBC_JAR" "$MAIN_CLASS" "$PORT_VALUE"

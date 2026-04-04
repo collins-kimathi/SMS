@@ -76,10 +76,9 @@ Then edit `.env` with your actual values. The deploy script will load it automat
 Then compile from the project root:
 
 ```bash
-rm -rf out
-mkdir -p out
-javac -cp "$JDBC_JAR" -d out src/main/java/com/uniongroup/sms/SmsApplication.java
-cp -r src/main/resources/* out/
+rm -rf target/classes
+mkdir -p target/classes
+javac -cp "$JDBC_JAR" -d target/classes src/main/java/com/uniongroup/sms/*.java
 ```
 
 ### Run
@@ -87,7 +86,7 @@ cp -r src/main/resources/* out/
 Run on the configured port:
 
 ```bash
-java -cp out:"$JDBC_JAR" com.uniongroup.sms.SmsApplication "${PORT:-9090}"
+java -cp target/classes:"$JDBC_JAR" com.uniongroup.sms.SmsApplication "${PORT:-9090}"
 ```
 
 Then open:
@@ -111,6 +110,8 @@ The script validates:
 - `SMS_DB_USER`
 - `SMS_DB_PASSWORD`
 - `JDBC_JAR`
+
+The script compiles Java into `target/classes`. Static frontend files are served directly from `src/main/resources/static` during local development.
 
 ### Main pages
 
