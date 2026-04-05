@@ -9,7 +9,7 @@ import java.util.Base64;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 
-// Central password helper for hashing, verification, and legacy-password upgrades.
+// Password hashing + verification (PBKDF2) with legacy support
 final class PasswordUtils {
 
     private static final String PASSWORD_PREFIX = "pbkdf2$";
@@ -17,15 +17,17 @@ final class PasswordUtils {
     private static final int PASSWORD_KEY_LENGTH = 256;
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    private PasswordUtils() {
-    }
+    private PasswordUtils() {}
 
+    // Detect hashed format (used for backward compatibility)
     static boolean isHashedPassword(String password) {
         return password != null && password.startsWith(PASSWORD_PREFIX);
     }
 
+    // Verify password against stored value (supports plain + hashed)
     static boolean verifyPassword(String rawPassword, String storedPassword) {
         if (!isHashedPassword(storedPassword)) {
+            // legacy plain-text comparison
             return storedPassword.equals(rawPassword);
         }
 
@@ -38,50 +40,73 @@ final class PasswordUtils {
             int iterations = Integer.parseInt(parts[1]);
             byte[] salt = decodeBase64(parts[2]);
             byte[] expected = decodeBase64(parts[3]);
-            byte[] actual = derivePassword(rawPassword.toCharArray(), salt, iterations, expected.length * 8);
+
+            byte[] actual = derivePassword(
+                rawPassword.toCharArray(),
+                salt,
+                iterations,
+                expected.length * 8
+            );
+
             return constantTimeEquals(expected, actual);
-        } catch (IllegalArgumentException exception) {
+        } catch (IllegalArgumentException e) {
             return false;
         }
     }
 
+    // Upgrade plain-text password to hashed format on login
     static void upgradePlainTextPasswordIfNeeded(Connection connection, int userId, String storedPassword) throws SQLException {
         if (isHashedPassword(storedPassword)) {
             return;
         }
 
-        try (PreparedStatement statement = connection.prepareStatement("UPDATE users SET password = ? WHERE user_id = ?")) {
-            statement.setString(1, hashPassword(storedPassword));
-            statement.setInt(2, userId);
-            statement.executeUpdate();
+        try (PreparedStatement ps = connection.prepareStatement(
+            "UPDATE users SET password = ? WHERE user_id = ?")) {
+
+            ps.setString(1, hashPassword(storedPassword));
+            ps.setInt(2, userId);
+            ps.executeUpdate();
         }
     }
 
+    // Generate PBKDF2 hash with random salt
     static String hashPassword(String password) {
         byte[] salt = new byte[16];
         RANDOM.nextBytes(salt);
-        byte[] hash = derivePassword(password.toCharArray(), salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH);
-        return PASSWORD_PREFIX + PASSWORD_ITERATIONS + "$" + encodeBase64(salt) + "$" + encodeBase64(hash);
+
+        byte[] hash = derivePassword(
+            password.toCharArray(),
+            salt,
+            PASSWORD_ITERATIONS,
+            PASSWORD_KEY_LENGTH
+        );
+
+        return PASSWORD_PREFIX
+            + PASSWORD_ITERATIONS + "$"
+            + encodeBase64(salt) + "$"
+            + encodeBase64(hash);
     }
 
+    // Core PBKDF2 derivation
     private static byte[] derivePassword(char[] password, byte[] salt, int iterations, int keyLength) {
         try {
             PBEKeySpec spec = new PBEKeySpec(password, salt, iterations, keyLength);
             SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
             return factory.generateSecret(spec).getEncoded();
-        } catch (InvalidKeySpecException | java.security.NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("Failed to hash password", exception);
+        } catch (InvalidKeySpecException | java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("Failed to hash password", e);
         }
     }
 
+    // Prevent timing attacks during comparison
     private static boolean constantTimeEquals(byte[] left, byte[] right) {
         if (left == null || right == null || left.length != right.length) {
             return false;
         }
 
         int result = 0;
-        for (int index = 0; index < left.length; index++) {
-            result |= left[index] ^ right[index];
+        for (int i = 0; i < left.length; i++) {
+            result |= left[i] ^ right[i];
         }
         return result == 0;
     }

@@ -10,8 +10,6 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Date;
 import java.sql.DriverManager;
@@ -33,7 +31,6 @@ public class SmsApplication {
     // Core application settings, security constants, and required database configuration.
     private static final int DEFAULT_PORT = 8080;
     private static final String STATIC_ROOT = "/static";
-    private static final Path SOURCE_STATIC_DIR = Path.of("src", "main", "resources", "static");
     private static final String SESSION_COOKIE = "sms_session";
     private static final long SESSION_TTL_MILLIS = 8L * 60L * 60L * 1000L;
     private static final String DB_URL = requireEnv("SMS_DB_URL");
@@ -368,18 +365,6 @@ public class SmsApplication {
     // HTTP parsing, session lookup, and response helpers
     // ---------------------------------------------------------------------
     private static void serveStaticResource(HttpExchange exchange, String path) throws IOException {
-        Path sourcePath = SOURCE_STATIC_DIR.resolve(path.startsWith("/") ? path.substring(1) : path).normalize();
-        if (sourcePath.startsWith(SOURCE_STATIC_DIR) && Files.isRegularFile(sourcePath)) {
-            byte[] content = Files.readAllBytes(sourcePath);
-            exchange.getResponseHeaders().set("Content-Type", contentTypeFor(path));
-            exchange.sendResponseHeaders(200, content.length);
-
-            try (OutputStream outputStream = exchange.getResponseBody()) {
-                outputStream.write(content);
-            }
-            return;
-        }
-
         String resourcePath = STATIC_ROOT + path;
 
         try (InputStream inputStream = SmsApplication.class.getResourceAsStream(resourcePath)) {
@@ -552,7 +537,7 @@ public class SmsApplication {
             return parsePort(args[0]);
         }
 
-        String envPort = EnvConfig.get("PORT");
+        String envPort = System.getenv("PORT");
         if (envPort != null && !envPort.isBlank()) {
             return parsePort(envPort);
         }
@@ -573,7 +558,7 @@ public class SmsApplication {
     }
 
     private static String envOrDefault(String key, String fallback) {
-        String value = EnvConfig.get(key);
+        String value = System.getenv(key);
         if (value == null || value.isBlank()) {
             return fallback;
         }
@@ -581,7 +566,7 @@ public class SmsApplication {
     }
 
     private static String requireEnv(String key) {
-        String value = EnvConfig.get(key);
+        String value = System.getenv(key);
         if (value == null || value.isBlank()) {
             throw new IllegalStateException("Missing required environment variable: " + key);
         }

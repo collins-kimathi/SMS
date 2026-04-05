@@ -3,21 +3,15 @@ package com.uniongroup.sms;
 import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.sql.Connection;
-import java.sql.Date;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.sql.*;
+import java.util.*;
 
-// Handles admin report endpoints and CSV export.
+// Admin reporting endpoints (JSON + CSV export)
 final class ReportController {
 
-    private ReportController() {
-    }
+    private ReportController() {}
 
+    // Access logs within date range
     static void handleAccessReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
         SmsApplication.requireAdmin(session);
@@ -42,22 +36,25 @@ final class ReportController {
             + "ORDER BY al.visit_date DESC, al.log_id DESC";
 
         List<String> rows = new ArrayList<>();
-        try (Connection connection = SmsApplication.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setDate(1, Date.valueOf(startDate));
-            statement.setDate(2, Date.valueOf(endDate));
 
-            try (ResultSet resultSet = statement.executeQuery()) {
-                while (resultSet.next()) {
-                    String exitTime = resultSet.getTime("exit_time") == null ? "" : resultSet.getTime("exit_time").toString();
+        try (Connection connection = SmsApplication.getConnection();
+             PreparedStatement ps = connection.prepareStatement(sql)) {
+
+            ps.setDate(1, java.sql.Date.valueOf(startDate));
+            ps.setDate(2, java.sql.Date.valueOf(endDate));
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String exitTime = rs.getTime("exit_time") == null ? "" : rs.getTime("exit_time").toString();
+
                     rows.add("{"
-                        + "\"id\":" + resultSet.getInt("log_id") + ","
-                        + "\"date\":\"" + resultSet.getDate("visit_date") + "\","
-                        + "\"visitorName\":\"" + SmsApplication.escapeJson(resultSet.getString("visitor_name")) + "\","
-                        + "\"host\":\"" + SmsApplication.escapeJson(resultSet.getString("employee_name") + " (" + resultSet.getString("department") + ")") + "\","
-                        + "\"entryTime\":\"" + resultSet.getTime("entry_time") + "\","
+                        + "\"id\":" + rs.getInt("log_id") + ","
+                        + "\"date\":\"" + rs.getDate("visit_date") + "\","
+                        + "\"visitorName\":\"" + SmsApplication.escapeJson(rs.getString("visitor_name")) + "\","
+                        + "\"host\":\"" + SmsApplication.escapeJson(rs.getString("employee_name") + " (" + rs.getString("department") + ")") + "\","
+                        + "\"entryTime\":\"" + rs.getTime("entry_time") + "\","
                         + "\"exitTime\":\"" + SmsApplication.escapeJson(exitTime) + "\","
-                        + "\"recordedBy\":\"" + SmsApplication.escapeJson(resultSet.getString("username")) + "\""
+                        + "\"recordedBy\":\"" + SmsApplication.escapeJson(rs.getString("username")) + "\""
                         + "}");
                 }
             }
@@ -66,6 +63,7 @@ final class ReportController {
         SmsApplication.sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
+    // Incident reports within date range
     static void handleIncidentReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
         SmsApplication.requireAdmin(session);
@@ -87,22 +85,24 @@ final class ReportController {
             + "ORDER BY i.reported_at DESC, i.incident_id DESC";
 
         List<String> rows = new ArrayList<>();
-        try (Connection connection = SmsApplication.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setDate(1, Date.valueOf(startDate));
-            statement.setDate(2, Date.valueOf(endDate));
 
-            try (ResultSet resultSet = statement.executeQuery()) {
-                while (resultSet.next()) {
+        try (Connection connection = SmsApplication.getConnection();
+             PreparedStatement ps = connection.prepareStatement(sql)) {
+
+            ps.setDate(1, java.sql.Date.valueOf(startDate));
+            ps.setDate(2, java.sql.Date.valueOf(endDate));
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
                     rows.add("{"
-                        + "\"id\":" + resultSet.getInt("incident_id") + ","
-                        + "\"date\":\"" + resultSet.getTimestamp("reported_at").toLocalDateTime().toLocalDate() + "\","
-                        + "\"title\":\"" + SmsApplication.escapeJson(resultSet.getString("title")) + "\","
-                        + "\"incidentType\":\"" + SmsApplication.escapeJson(resultSet.getString("incident_type")) + "\","
-                        + "\"location\":\"" + SmsApplication.escapeJson(resultSet.getString("location")) + "\","
-                        + "\"severity\":\"" + SmsApplication.escapeJson(resultSet.getString("severity")) + "\","
-                        + "\"status\":\"" + SmsApplication.escapeJson(resultSet.getString("status")) + "\","
-                        + "\"reportedBy\":\"" + SmsApplication.escapeJson(resultSet.getString("username")) + "\""
+                        + "\"id\":" + rs.getInt("incident_id") + ","
+                        + "\"date\":\"" + rs.getTimestamp("reported_at").toLocalDateTime().toLocalDate() + "\","
+                        + "\"title\":\"" + SmsApplication.escapeJson(rs.getString("title")) + "\","
+                        + "\"incidentType\":\"" + SmsApplication.escapeJson(rs.getString("incident_type")) + "\","
+                        + "\"location\":\"" + SmsApplication.escapeJson(rs.getString("location")) + "\","
+                        + "\"severity\":\"" + SmsApplication.escapeJson(rs.getString("severity")) + "\","
+                        + "\"status\":\"" + SmsApplication.escapeJson(rs.getString("status")) + "\","
+                        + "\"reportedBy\":\"" + SmsApplication.escapeJson(rs.getString("username")) + "\""
                         + "}");
                 }
             }
@@ -111,6 +111,7 @@ final class ReportController {
         SmsApplication.sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
+    // Visitor registrations within date range
     static void handleVisitorReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
         SmsApplication.requireAdmin(session);
@@ -131,20 +132,22 @@ final class ReportController {
             + "ORDER BY created_at DESC, visitor_id DESC";
 
         List<String> rows = new ArrayList<>();
-        try (Connection connection = SmsApplication.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setDate(1, Date.valueOf(startDate));
-            statement.setDate(2, Date.valueOf(endDate));
 
-            try (ResultSet resultSet = statement.executeQuery()) {
-                while (resultSet.next()) {
+        try (Connection connection = SmsApplication.getConnection();
+             PreparedStatement ps = connection.prepareStatement(sql)) {
+
+            ps.setDate(1, java.sql.Date.valueOf(startDate));
+            ps.setDate(2, java.sql.Date.valueOf(endDate));
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
                     rows.add("{"
-                        + "\"id\":" + resultSet.getInt("visitor_id") + ","
-                        + "\"date\":\"" + resultSet.getTimestamp("created_at").toLocalDateTime().toLocalDate() + "\","
-                        + "\"name\":\"" + SmsApplication.escapeJson(resultSet.getString("name")) + "\","
-                        + "\"nationalId\":\"" + SmsApplication.escapeJson(resultSet.getString("national_id")) + "\","
-                        + "\"phoneNumber\":\"" + SmsApplication.escapeJson(resultSet.getString("phone_number")) + "\","
-                        + "\"purposeOfVisit\":\"" + SmsApplication.escapeJson(resultSet.getString("purpose_of_visit")) + "\""
+                        + "\"id\":" + rs.getInt("visitor_id") + ","
+                        + "\"date\":\"" + rs.getTimestamp("created_at").toLocalDateTime().toLocalDate() + "\","
+                        + "\"name\":\"" + SmsApplication.escapeJson(rs.getString("name")) + "\","
+                        + "\"nationalId\":\"" + SmsApplication.escapeJson(rs.getString("national_id")) + "\","
+                        + "\"phoneNumber\":\"" + SmsApplication.escapeJson(rs.getString("phone_number")) + "\","
+                        + "\"purposeOfVisit\":\"" + SmsApplication.escapeJson(rs.getString("purpose_of_visit")) + "\""
                         + "}");
                 }
             }
@@ -153,6 +156,7 @@ final class ReportController {
         SmsApplication.sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
+    // Audit logs within date range
     static void handleAuditReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
         SmsApplication.requireAdmin(session);
@@ -173,21 +177,23 @@ final class ReportController {
             + "ORDER BY created_at DESC, audit_id DESC";
 
         List<String> rows = new ArrayList<>();
-        try (Connection connection = SmsApplication.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setDate(1, Date.valueOf(startDate));
-            statement.setDate(2, Date.valueOf(endDate));
 
-            try (ResultSet resultSet = statement.executeQuery()) {
-                while (resultSet.next()) {
+        try (Connection connection = SmsApplication.getConnection();
+             PreparedStatement ps = connection.prepareStatement(sql)) {
+
+            ps.setDate(1, java.sql.Date.valueOf(startDate));
+            ps.setDate(2, java.sql.Date.valueOf(endDate));
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
                     rows.add("{"
-                        + "\"id\":" + resultSet.getInt("audit_id") + ","
-                        + "\"date\":\"" + resultSet.getTimestamp("created_at").toLocalDateTime().toLocalDate() + "\","
-                        + "\"actionType\":\"" + SmsApplication.escapeJson(resultSet.getString("action_type")) + "\","
-                        + "\"entityType\":\"" + SmsApplication.escapeJson(resultSet.getString("entity_type")) + "\","
-                        + "\"entityId\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(resultSet.getString("entity_id"), "")) + "\","
-                        + "\"details\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(resultSet.getString("details"), "")) + "\","
-                        + "\"username\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(resultSet.getString("username"), "System")) + "\""
+                        + "\"id\":" + rs.getInt("audit_id") + ","
+                        + "\"date\":\"" + rs.getTimestamp("created_at").toLocalDateTime().toLocalDate() + "\","
+                        + "\"actionType\":\"" + SmsApplication.escapeJson(rs.getString("action_type")) + "\","
+                        + "\"entityType\":\"" + SmsApplication.escapeJson(rs.getString("entity_type")) + "\","
+                        + "\"entityId\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("entity_id"), "")) + "\","
+                        + "\"details\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("details"), "")) + "\","
+                        + "\"username\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("username"), "System")) + "\""
                         + "}");
                 }
             }
@@ -196,6 +202,7 @@ final class ReportController {
         SmsApplication.sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
+    // Export report as CSV (download response)
     static void handleExport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
         SmsApplication.requireAdmin(session);
@@ -210,6 +217,7 @@ final class ReportController {
             return;
         }
 
+        // Delegate CSV generation to builder
         String csv = CsvReportBuilder.build(
             type,
             startDate,
@@ -218,10 +226,14 @@ final class ReportController {
             SmsApplication.dbUser(),
             SmsApplication.dbPassword()
         );
+
         byte[] payload = csv.getBytes(StandardCharsets.UTF_8);
+
+        // Configure download response headers
         exchange.getResponseHeaders().set("Content-Type", "text/csv; charset=UTF-8");
         exchange.getResponseHeaders().set("Content-Disposition",
             "attachment; filename=\"" + type + "-report-" + startDate + "-to-" + endDate + ".csv\"");
+
         exchange.sendResponseHeaders(200, payload.length);
         exchange.getResponseBody().write(payload);
         exchange.getResponseBody().close();
