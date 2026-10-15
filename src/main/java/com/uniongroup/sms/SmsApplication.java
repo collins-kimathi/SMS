@@ -13,19 +13,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Time;
 import java.sql.Timestamp;
-import java.time.LocalDate;
-import java.time.LocalTime;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 public class SmsApplication {
@@ -570,14 +564,6 @@ public class SmsApplication {
         } catch (NumberFormatException exception) {
             throw new IllegalArgumentException("Port must be a number.", exception);
         }
-    }
-
-    private static String envOrDefault(String key, String fallback) {
-        String value = System.getenv(key);
-        if (value == null || value.isBlank()) {
-            return fallback;
-        }
-        return value;
     }
 
     private static String requireEnv(String key) {

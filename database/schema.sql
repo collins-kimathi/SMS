@@ -82,12 +82,12 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 -- Starter accounts for the first login after setup.
 INSERT INTO users (username, password, role)
-VALUES
-    ('admin', 'pbkdf2$120000$kQk15HYP0JxviSD0GV8I4Q$8qNL7LC5mRPUdqsZQMBuY_iU5GDu_klB7CbuNI-RubI', 'Admin'),
-    ('officer', 'pbkdf2$120000$0o9GlaVREIZpnu78VPRlJA$TOkwY37-xQV88QbEdlyoj4foPzmnDCFRfKgmlgd16JI', 'Security')
-ON DUPLICATE KEY UPDATE
-    password = VALUES(password),
-    role = VALUES(role);
+SELECT 'admin', 'pbkdf2$120000$kQk15HYP0JxviSD0GV8I4Q$8qNL7LC5mRPUdqsZQMBuY_iU5GDu_klB7CbuNI-RubI', 'Admin'
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
+
+INSERT INTO users (username, password, role)
+SELECT 'officer', 'pbkdf2$120000$0o9GlaVREIZpnu78VPRlJA$TOkwY37-xQV88QbEdlyoj4foPzmnDCFRfKgmlgd16JI', 'Security'
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'officer');
 
 -- Sample employees so access control has host options immediately after setup.
 INSERT INTO employees (name, department, phone_number)
