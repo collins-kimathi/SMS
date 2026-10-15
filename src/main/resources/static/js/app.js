@@ -1,28 +1,44 @@
-let currentSession = null;
-let incidentCache = [];
+// ---------------------------------------------------------------------
+// Global variables
+// ---------------------------------------------------------------------
 
-// Browser-side session cache so each page can make role decisions without refetching constantly.
+let currentSession = null; // Stores the currently logged-in user's session info
+let incidentCache = [];    // Local cache of incident records for filtering
+
+// ---------------------------------------------------------------------
+// Session management helpers
+// ---------------------------------------------------------------------
+
+// Get the current session object
 function getSession() {
     return currentSession;
 }
 
+// Set the current session object
 function setSession(session) {
     currentSession = session;
 }
 
+// Clear the session (logout)
 function clearSession() {
     currentSession = null;
 }
 
-// Shared flash-message helper used across forms and management pages.
+// ---------------------------------------------------------------------
+// UI helper functions
+// ---------------------------------------------------------------------
+
+// Display flash messages in the UI
+// elementId: target element
+// text: message content
+// isError: if true, style as an error
 function message(elementId, text, isError = false) {
     const element = document.getElementById(elementId);
-    if (!element) {
-        return;
-    }
+    if (!element) return;
 
     element.textContent = text;
     element.classList.remove("hidden", "alert-success");
+
     if (isError) {
         element.style.background = "rgba(239, 68, 68, 0.14)";
         element.style.border = "1px solid rgba(239, 68, 68, 0.28)";
@@ -35,32 +51,60 @@ function message(elementId, text, isError = false) {
     }
 }
 
+// Returns a table row with a message when the table is empty
 function tableEmptyRow(colspan, text) {
     return `<tr><td colspan="${colspan}" class="table-empty">${text}</td></tr>`;
 }
 
+// Formats today's date in "en-GB" format
 function formatToday() {
-    return new Intl.DateTimeFormat("en-GB", {
-        dateStyle: "full"
-    }).format(new Date());
+    return new Intl.DateTimeFormat("en-GB", { dateStyle: "full" }).format(new Date());
 }
 
+// Normalizes a role string for comparison
 function normalizedRole(role) {
-    return String(role || "")
-        .toLowerCase()
-        .replace(/\s+/g, "");
+    return String(role || "").toLowerCase().replace(/\s+/g, "");
 }
 
-// Route guard rules for each role. The backend still enforces these permissions too.
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function formatDateLabel(value) {
+    if (!value) return "-";
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+    return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(date);
+}
+
+function reportEndpoint(type, startDate, endDate) {
+    const params = `startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+    const map = {
+        access: `/api/reports/access?${params}`,
+        incidents: `/api/reports/incidents?${params}`,
+        visitors: `/api/reports/visitors?${params}`,
+        audit: `/api/reports/audit?${params}`
+    };
+    return map[type] || map.access;
+}
+
+// ---------------------------------------------------------------------
+// Role-based route access
+// ---------------------------------------------------------------------
+
+// Check if a user with a given session can access a page
 function canAccessPage(page, session) {
     const publicPages = new Set(["login", "index"]);
-    if (publicPages.has(page)) {
-        return true;
-    }
+    if (publicPages.has(page)) return true;
 
-    if (!session) {
-        return false;
-    }
+    if (!session) return false;
 
     const role = normalizedRole(session.role);
     const allowedPages = {
@@ -72,6 +116,7 @@ function canAccessPage(page, session) {
     return (allowedPages[role] || new Set(["dashboard"])).has(page);
 }
 
+// Redirect users if they cannot access the page
 function protectRoute(page) {
     const session = getSession();
 
@@ -88,25 +133,26 @@ function protectRoute(page) {
     return true;
 }
 
-// Keep the navigation aligned with the current role so users only see allowed pages.
+// Apply role-based UI changes (hide restricted links)
 function applyRolePermissions() {
     const session = getSession();
-    if (!session) {
-        return;
-    }
+    if (!session) return;
 
     const role = normalizedRole(session.role);
     const restrictedPages = role === "admin"
         ? new Set(["visitor-registration.html", "access-control.html", "incident-report.html"])
         : new Set(["users.html", "employees.html", "reports.html", "audit-history.html"]);
 
-    // Hide links the current role cannot use so the nav mirrors backend authorization.
     document.querySelectorAll("a[href]").forEach((link) => {
         if (restrictedPages.has(link.getAttribute("href"))) {
             link.classList.add("hidden");
         }
     });
 }
+
+// ---------------------------------------------------------------------
+// Logout handling
+// ---------------------------------------------------------------------
 
 function bindLogout() {
     document.querySelectorAll("[data-logout]").forEach((link) => {
@@ -115,7 +161,7 @@ function bindLogout() {
             try {
                 await api("/api/logout", { method: "POST" });
             } catch (_error) {
-                // Clear client state even if the server session is already gone.
+                // Ignore errors; clear client-side state anyway
             }
             clearSession();
             window.location.href = "login.html";
@@ -123,18 +169,17 @@ function bindLogout() {
     });
 }
 
-// Generic fetch wrapper for all backend API requests.
+// ---------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------
+
+// Generic fetch wrapper for backend API requests
 async function api(path, options = {}) {
-    const response = await fetch(path, {
-        credentials: "same-origin",
-        ...options
-    });
+    const response = await fetch(path, { credentials: "same-origin", ...options });
     const contentType = response.headers.get("Content-Type") || "";
     const payload = response.status === 204
         ? null
-        : contentType.includes("application/json")
-            ? await response.json()
-            : await response.text();
+        : contentType.includes("application/json") ? await response.json() : await response.text();
 
     if (!response.ok) {
         const messageText = typeof payload === "string" ? payload : payload.message || "Request failed";
@@ -144,54 +189,36 @@ async function api(path, options = {}) {
     return payload;
 }
 
+// Converts an object to URLSearchParams for form submissions
 function formBody(values) {
     return new URLSearchParams(values);
 }
 
 // ---------------------------------------------------------------------
-// Data loading helpers
+// Data loading functions
 // ---------------------------------------------------------------------
 
-async function loadVisitors() {
-    return api("/api/visitors");
-}
-
-async function loadEmployees() {
-    return api("/api/employees");
-}
-
-async function loadAccessLogs() {
-    return api("/api/access-logs");
-}
-
-async function loadIncidents() {
-    return api("/api/incidents");
-}
-
-async function loadUsers() {
-    return api("/api/users");
-}
-
-async function loadEmployeeDirectory() {
-    return api("/api/employees");
-}
+async function loadVisitors() { return api("/api/visitors"); }
+async function loadEmployees() { return api("/api/employees"); }
+async function loadAccessLogs() { return api("/api/access-logs"); }
+async function loadIncidents() { return api("/api/incidents"); }
+async function loadUsers() { return api("/api/users"); }
+async function loadEmployeeDirectory() { return api("/api/employees"); }
 
 async function loadAccessReport(startDate, endDate) {
     return api(`/api/reports/access?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
-
 async function loadIncidentReport(startDate, endDate) {
     return api(`/api/reports/incidents?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
-
 async function loadVisitorReport(startDate, endDate) {
     return api(`/api/reports/visitors?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
-
 async function loadAuditReport(startDate, endDate) {
     return api(`/api/reports/audit?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 }
 
+// Default audit date range (last 7 days)
 function defaultAuditRange() {
     const end = new Date();
     const start = new Date();
@@ -206,476 +233,438 @@ function defaultAuditRange() {
 // Table rendering helpers
 // ---------------------------------------------------------------------
 
+// Render visitor table
 async function renderVisitorTable() {
-    const table = document.getElementById("visitorTable");
-    if (!table) {
-        return [];
-    }
+    const target = document.getElementById("visitorTable");
+    if (!target) return;
 
     const visitors = await loadVisitors();
-    table.innerHTML = visitors.length
-        ? visitors.map((visitor) => `
-            <tr>
-                <td>${visitor.name}</td>
-                <td>${visitor.nationalId}</td>
-                <td>${visitor.phoneNumber}</td>
-                <td>${visitor.purposeOfVisit}</td>
-                <td>
-                    <div class="inline-actions">
-                        <button type="button" class="btn btn-secondary btn-small" data-edit-visitor="${visitor.id}">Edit</button>
-                        <button type="button" class="btn btn-danger btn-small" data-delete-visitor="${visitor.id}">Delete</button>
-                    </div>
-                </td>
-            </tr>
-        `).join("")
-        : tableEmptyRow(5, "No visitors registered yet.");
+    if (!visitors.length) {
+        target.innerHTML = tableEmptyRow(5, "No visitors registered yet.");
+        bindVisitorRowActions(visitors);
+        return;
+    }
+
+    target.innerHTML = visitors.map((visitor) => `
+        <tr>
+            <td>${escapeHtml(visitor.name)}</td>
+            <td>${escapeHtml(visitor.nationalId)}</td>
+            <td>${escapeHtml(visitor.phoneNumber)}</td>
+            <td>${escapeHtml(visitor.purposeOfVisit)}</td>
+            <td>
+                <button type="button" class="btn btn-secondary" data-edit-visitor="${visitor.id}">Edit</button>
+                <button type="button" class="btn btn-danger" data-delete-visitor="${visitor.id}">Delete</button>
+            </td>
+        </tr>
+    `).join("");
 
     bindVisitorRowActions(visitors);
-    return visitors;
 }
 
+// Render access dropdowns
 async function renderAccessSelects() {
-    const entrySelect = document.getElementById("visitorId");
-    const exitSelect = document.getElementById("exitVisitorId");
-    const employeeSelect = document.getElementById("employeeId");
-    const editVisitorSelect = document.getElementById("editVisitorId");
-    const editEmployeeSelect = document.getElementById("editEmployeeId");
     const [visitors, employees, logs] = await Promise.all([
         loadVisitors(),
-        loadEmployees(),
+        loadEmployeeDirectory(),
         loadAccessLogs()
     ]);
+    const activeVisitorIds = new Set(
+        logs.filter((log) => !log.exitTime).map((log) => Number(log.visitorId))
+    );
 
-    if (entrySelect) {
-        entrySelect.innerHTML = `
-            <option value="">Select registered visitor</option>
-            ${visitors.map((visitor) => `<option value="${visitor.id}">${visitor.name} (${visitor.nationalId})</option>`).join("")}
-        `;
+    const visitorOptions = visitors.map((visitor) => (
+        `<option value="${visitor.id}">${escapeHtml(visitor.name)} (${escapeHtml(visitor.nationalId)})</option>`
+    )).join("");
+    const activeVisitorOptions = visitors
+        .filter((visitor) => activeVisitorIds.has(Number(visitor.id)))
+        .map((visitor) => (
+            `<option value="${visitor.id}">${escapeHtml(visitor.name)} (${escapeHtml(visitor.nationalId)})</option>`
+        ))
+        .join("");
+    const employeeOptions = employees.map((employee) => (
+        `<option value="${employee.id}">${escapeHtml(employee.name)} (${escapeHtml(employee.department)})</option>`
+    )).join("");
+
+    [document.getElementById("visitorId"), document.getElementById("editVisitorId")].forEach((select) => {
+        if (!select) return;
+        select.innerHTML = `<option value="">Select visitor</option>${visitorOptions}`;
+    });
+
+    const exitVisitorSelect = document.getElementById("exitVisitorId");
+    if (exitVisitorSelect) {
+        exitVisitorSelect.innerHTML = `<option value="">Select visitor</option>${activeVisitorOptions}`;
     }
 
-    if (employeeSelect) {
-        employeeSelect.innerHTML = `
-            <option value="">Select host employee</option>
-            ${employees.map((employee) => `<option value="${employee.id}">${employee.name} (${employee.department})</option>`).join("")}
-        `;
-    }
-
-    if (editVisitorSelect) {
-        editVisitorSelect.innerHTML = `
-            <option value="">Select visitor record</option>
-            ${visitors.map((visitor) => `<option value="${visitor.id}">${visitor.name} (${visitor.nationalId})</option>`).join("")}
-        `;
-    }
-
-    if (editEmployeeSelect) {
-        editEmployeeSelect.innerHTML = `
-            <option value="">Select host employee</option>
-            ${employees.map((employee) => `<option value="${employee.id}">${employee.name} (${employee.department})</option>`).join("")}
-        `;
-    }
-
-    if (exitSelect) {
-        const activeIds = new Set(logs.filter((log) => !log.exitTime).map((log) => String(log.visitorId)));
-        const activeVisitors = visitors.filter((visitor) => activeIds.has(String(visitor.id)));
-        exitSelect.innerHTML = `
-            <option value="">Select active visitor</option>
-            ${activeVisitors.map((visitor) => `<option value="${visitor.id}">${visitor.name} (${visitor.nationalId})</option>`).join("")}
-        `;
-    }
-
-    return { visitors, employees, logs };
+    [document.getElementById("employeeId"), document.getElementById("editEmployeeId")].forEach((select) => {
+        if (!select) return;
+        select.innerHTML = `<option value="">Select employee</option>${employeeOptions}`;
+    });
 }
 
+// Render access table
 async function renderAccessTable(targetId = "accessTable", editable = true) {
-    const table = document.getElementById(targetId);
-    if (!table) {
-        return [];
-    }
+    const target = document.getElementById(targetId);
+    if (!target) return;
 
     const logs = await loadAccessLogs();
-    table.innerHTML = logs.length
-        ? logs.map((log) => `
-            <tr>
-                <td>${log.date}</td>
-                <td>${log.visitorName}</td>
-                <td>${log.host}</td>
-                <td>${String(log.entryTime).slice(0, 5)}</td>
-                <td>${log.exitTime ? String(log.exitTime).slice(0, 5) : "Still in building"}</td>
-                <td>${log.recordedBy}</td>
-                ${editable ? `
-                <td>
-                    <div class="inline-actions">
-                        <button type="button" class="btn btn-secondary btn-small" data-edit-access="${log.id}">Edit</button>
-                        <button type="button" class="btn btn-danger btn-small" data-delete-access="${log.id}">Delete</button>
-                    </div>
-                </td>
-                ` : ""}
-            </tr>
-        `).join("")
-        : tableEmptyRow(editable ? 7 : 6, "No access activity recorded yet.");
+    if (!logs.length) {
+        target.innerHTML = tableEmptyRow(editable ? 7 : 6, "No access logs recorded yet.");
+        if (editable) bindAccessRowActions(logs);
+        return;
+    }
+
+    target.innerHTML = logs.map((log) => `
+        <tr>
+            <td>${formatDateLabel(log.date)}</td>
+            <td>${escapeHtml(log.visitorName)}</td>
+            <td>${escapeHtml(log.host)}</td>
+            <td>${escapeHtml(log.entryTime)}</td>
+            <td>${escapeHtml(log.exitTime || "-")}</td>
+            <td>${escapeHtml(log.recordedBy)}</td>
+            ${editable ? `
+            <td>
+                <button type="button" class="btn btn-secondary" data-edit-access="${log.id}">Edit</button>
+                <button type="button" class="btn btn-danger" data-delete-access="${log.id}">Delete</button>
+            </td>` : ""}
+        </tr>
+    `).join("");
 
     if (editable) {
         bindAccessRowActions(logs);
     }
-    return logs;
 }
 
+// Render incident table
 async function renderIncidentTable() {
-    const table = document.getElementById("incidentTable");
-    if (!table) {
-        return [];
-    }
-
-    const incidents = await loadIncidents();
-    incidentCache = incidents;
-    return renderIncidentRows(incidents);
+    incidentCache = await loadIncidents();
+    renderIncidentRows(incidentCache);
 }
 
+// Render incidents rows
 function renderIncidentRows(incidents) {
-    const table = document.getElementById("incidentTable");
-    if (!table) {
-        return [];
+    const target = document.getElementById("incidentTable");
+    if (!target) return;
+
+    if (!incidents.length) {
+        target.innerHTML = tableEmptyRow(10, "No incidents found.");
+        bindIncidentRowActions(incidents);
+        return;
     }
 
-    table.innerHTML = incidents.length
-        ? incidents.map((incident) => `
-            <tr>
-                <td>${incident.date}</td>
-                <td>${incident.title}</td>
-                <td>${incident.incidentType}</td>
-                <td>${incident.location}</td>
-                <td>${incident.severity}</td>
-                <td>${incident.status}</td>
-                <td>${incident.reportedBy}</td>
-                <td>${incident.actionTaken || "-"}</td>
-                <td>${incident.description}</td>
-                <td>
-                    <div class="inline-actions">
-                        <button type="button" class="btn btn-secondary btn-small" data-edit-incident="${incident.id}">Edit</button>
-                    </div>
-                </td>
-            </tr>
-        `).join("")
-        : tableEmptyRow(10, "No incidents logged yet.");
+    target.innerHTML = incidents.map((incident) => `
+        <tr>
+            <td>${formatDateLabel(incident.date)}</td>
+            <td>${escapeHtml(incident.title)}</td>
+            <td>${escapeHtml(incident.incidentType)}</td>
+            <td>${escapeHtml(incident.location)}</td>
+            <td>${escapeHtml(incident.severity)}</td>
+            <td>${escapeHtml(incident.status)}</td>
+            <td>${escapeHtml(incident.reportedBy)}</td>
+            <td>${escapeHtml(incident.actionTaken || "-")}</td>
+            <td>${escapeHtml(incident.description)}</td>
+            <td>
+                <button type="button" class="btn btn-secondary" data-edit-incident="${incident.id}">Edit</button>
+            </td>
+        </tr>
+    `).join("");
 
     bindIncidentRowActions(incidents);
-    return incidents;
 }
 
+// Filter incidents based on status/date
 function filterIncidents() {
-    const status = (document.getElementById("incidentFilterStatus")?.value || "").trim();
-    const date = (document.getElementById("incidentFilterDate")?.value || "").trim();
+    const status = document.getElementById("incidentFilterStatus")?.value || "";
+    const date = document.getElementById("incidentFilterDate")?.value || "";
 
-    const filteredIncidents = incidentCache.filter((incident) => {
+    const filtered = incidentCache.filter((incident) => {
         const statusMatch = !status || incident.status === status;
         const dateMatch = !date || incident.date === date;
         return statusMatch && dateMatch;
     });
 
-    renderIncidentRows(filteredIncidents);
-
-    if (status || date) {
-        message("incidentMessage", `Filter applied. ${filteredIncidents.length} incident(s) matched.`);
-    }
+    renderIncidentRows(filtered);
 }
 
+// Render dashboard overview
 async function renderDashboard() {
     const session = getSession();
-    const [visitors, accessLogs, incidents] = await Promise.all([
+    const [visitors, logs, incidents] = await Promise.all([
         loadVisitors(),
         loadAccessLogs(),
         loadIncidents()
     ]);
-    const activeVisitors = accessLogs.filter((log) => !log.exitTime);
+
+    const activeVisitors = logs.filter((log) => !log.exitTime);
+    const recentIncidents = incidents.slice(0, 5);
 
     const sessionUser = document.getElementById("sessionUser");
+    const sessionRole = document.getElementById("sessionRole");
     const currentDate = document.getElementById("currentDate");
+    const activeVisitorsCount = document.getElementById("activeVisitorsCount");
     const visitorCount = document.getElementById("visitorCount");
     const openVisitsCount = document.getElementById("openVisitsCount");
     const incidentCount = document.getElementById("incidentCount");
-    const activeVisitorsCount = document.getElementById("activeVisitorsCount");
     const incidentPreview = document.getElementById("incidentPreview");
 
-    if (sessionUser) {
-        sessionUser.textContent = session ? session.username : "Operations Desk";
-    }
-    const sessionRole = document.getElementById("sessionRole");
-    if (sessionRole) {
-        sessionRole.textContent = session ? session.role : "-";
-    }
-    if (currentDate) {
-        currentDate.textContent = formatToday();
-    }
-    if (visitorCount) {
-        visitorCount.textContent = String(visitors.length);
-    }
-    if (openVisitsCount) {
-        openVisitsCount.textContent = String(activeVisitors.length);
-    }
-    if (incidentCount) {
-        incidentCount.textContent = String(incidents.length);
-    }
-    if (activeVisitorsCount) {
-        activeVisitorsCount.textContent = String(activeVisitors.length);
-    }
+    if (sessionUser) sessionUser.textContent = session?.username || "Operations Desk";
+    if (sessionRole) sessionRole.textContent = session?.role || "-";
+    if (currentDate) currentDate.textContent = formatToday();
+    if (activeVisitorsCount) activeVisitorsCount.textContent = String(activeVisitors.length);
+    if (visitorCount) visitorCount.textContent = String(visitors.length);
+    if (openVisitsCount) openVisitsCount.textContent = String(activeVisitors.length);
+    if (incidentCount) incidentCount.textContent = String(incidents.length);
+
     if (incidentPreview) {
-        const recent = incidents.slice(0, 3);
-        incidentPreview.innerHTML = recent.length
-            ? recent.map((incident) => `
+        if (!recentIncidents.length) {
+            incidentPreview.classList.add("empty-state");
+            incidentPreview.innerHTML = "No incidents logged yet.";
+        } else {
+            incidentPreview.classList.remove("empty-state");
+            incidentPreview.innerHTML = recentIncidents.map((incident) => `
                 <div class="record-item">
-                    <strong>${incident.title}</strong>
-                    <p>${incident.incidentType} at ${incident.location}</p>
-                    <p>${incident.severity} severity, ${incident.status}</p>
-                    <p>${incident.date} by ${incident.reportedBy}</p>
+                    <strong>${escapeHtml(incident.title)}</strong>
+                    <p>${escapeHtml(incident.status)} | ${formatDateLabel(incident.date)} | ${escapeHtml(incident.location)}</p>
                 </div>
-            `).join("")
-            : "No incidents logged yet.";
+            `).join("");
+        }
     }
 
     await renderAccessTable("dashboardAccessTable", false);
-
-    const securityActions = document.querySelectorAll("[href=\"visitor-registration.html\"], [href=\"access-control.html\"], [href=\"incident-report.html\"]");
-    const userActions = document.querySelectorAll("[href=\"users.html\"], [href=\"employees.html\"], [href=\"reports.html\"], [href=\"audit-history.html\"]");
-    const role = normalizedRole(session ? session.role : "");
-
-    securityActions.forEach((element) => {
-        if (role === "admin") {
-            element.classList.add("hidden");
-        }
-    });
-
-    userActions.forEach((element) => {
-        if (role !== "admin") {
-            element.classList.add("hidden");
-        }
-    });
-
 }
 
+// Render users table
 async function renderUsersTable() {
-    const table = document.getElementById("usersTable");
-    if (!table) {
-        return [];
-    }
+    const target = document.getElementById("usersTable");
+    if (!target) return;
 
     const users = await loadUsers();
-    const session = getSession();
-    table.innerHTML = users.length
-        ? users.map((user) => `
-            <tr>
-                <td>${user.userId}</td>
-                <td>${user.username}</td>
-                <td>${user.role}</td>
-                <td>
-                    <div class="inline-actions">
-                        <button type="button" class="btn btn-secondary btn-small" data-edit-user="${user.userId}">Edit</button>
-                        <button type="button" class="btn btn-danger btn-small" data-delete-user="${user.userId}" ${session && session.userId === user.userId ? "disabled" : ""}>Delete</button>
-                    </div>
-                </td>
-            </tr>
-        `).join("")
-        : tableEmptyRow(4, "No users found.");
 
-    bindUserRowActions(users);
-    return users;
-}
-
-async function renderEmployeesTable() {
-    const table = document.getElementById("employeesTable");
-    if (!table) {
-        return [];
-    }
-
-    const employees = await loadEmployeeDirectory();
-    table.innerHTML = employees.length
-        ? employees.map((employee) => `
-            <tr>
-                <td>${employee.id}</td>
-                <td>${employee.name}</td>
-                <td>${employee.department}</td>
-                <td>${employee.phoneNumber || "-"}</td>
-                <td>
-                    <div class="inline-actions">
-                        <button type="button" class="btn btn-secondary btn-small" data-edit-employee="${employee.id}">Edit</button>
-                        <button type="button" class="btn btn-danger btn-small" data-delete-employee="${employee.id}">Delete</button>
-                    </div>
-                </td>
-            </tr>
-        `).join("")
-        : tableEmptyRow(5, "No employees found.");
-
-    bindEmployeeRowActions(employees);
-    return employees;
-}
-
-function renderReportsHeader(type) {
-    const head = document.getElementById("reportsHead");
-    if (!head) {
+    if (!users.length) {
+        target.innerHTML = tableEmptyRow(4, "No users found.");
+        bindUserRowActions(users);
         return;
     }
 
-    const headings = {
-        access: ["Date", "Visitor", "Host", "Entry", "Exit", "Recorded By"],
+    target.innerHTML = users.map((user) => `
+        <tr>
+            <td>${user.userId}</td>
+            <td>${user.username}</td>
+            <td>${user.role}</td>
+            <td>
+                <button type="button" class="btn btn-secondary" data-edit-user="${user.userId}">Edit</button>
+                <button type="button" class="btn btn-danger" data-delete-user="${user.userId}">Delete</button>
+            </td>
+        </tr>
+    `).join("");
+
+    bindUserRowActions(users);
+}
+
+// Render employees table
+async function renderEmployeesTable() {
+    const target = document.getElementById("employeesTable");
+    if (!target) return;
+
+    const employees = await loadEmployees();
+    if (!employees.length) {
+        target.innerHTML = tableEmptyRow(5, "No employees found.");
+        bindEmployeeRowActions(employees);
+        return;
+    }
+
+    target.innerHTML = employees.map((employee) => `
+        <tr>
+            <td>${employee.id}</td>
+            <td>${escapeHtml(employee.name)}</td>
+            <td>${escapeHtml(employee.department)}</td>
+            <td>${escapeHtml(employee.phoneNumber || "-")}</td>
+            <td>
+                <button type="button" class="btn btn-secondary" data-edit-employee="${employee.id}">Edit</button>
+                <button type="button" class="btn btn-danger" data-delete-employee="${employee.id}">Delete</button>
+            </td>
+        </tr>
+    `).join("");
+
+    bindEmployeeRowActions(employees);
+}
+
+// Render reports header
+function renderReportsHeader(type) {
+    const head = document.getElementById("reportsHead");
+    if (!head) return;
+
+    const headers = {
+        access: ["Date", "Visitor", "Host", "Entry Time", "Exit Time", "Recorded By"],
         incidents: ["Date", "Title", "Type", "Location", "Severity", "Status", "Reported By"],
-        visitors: ["Date", "Visitor", "ID / Passport", "Phone", "Purpose"],
+        visitors: ["Date", "Name", "ID / Passport", "Phone", "Purpose"],
         audit: ["Date", "Action", "Entity", "Entity ID", "User", "Details"]
     };
 
-    head.innerHTML = `<tr>${(headings[type] || headings.access).map((label) => `<th>${label}</th>`).join("")}</tr>`;
+    head.innerHTML = `<tr>${(headers[type] || headers.access).map((label) => `<th>${label}</th>`).join("")}</tr>`;
 }
 
-// Reports share one renderer so each report type follows the same table workflow.
+// Render reports table
 async function renderReportsTable(rows = [], type = "access") {
-    const table = document.getElementById("reportsTable");
-    if (!table) {
-        return;
-    }
+    const target = document.getElementById("reportsTable");
+    if (!target) return;
 
-    // One renderer supports all report types so the page can switch views without duplicating tables.
     renderReportsHeader(type);
 
-    const renderers = {
-        access: (log) => `
-            <tr>
-                <td>${log.date}</td>
-                <td>${log.visitorName}</td>
-                <td>${log.host}</td>
-                <td>${String(log.entryTime).slice(0, 5)}</td>
-                <td>${log.exitTime ? String(log.exitTime).slice(0, 5) : "Still in building"}</td>
-                <td>${log.recordedBy}</td>
-            </tr>
-        `,
-        incidents: (incident) => `
-            <tr>
-                <td>${incident.date}</td>
-                <td>${incident.title}</td>
-                <td>${incident.incidentType}</td>
-                <td>${incident.location}</td>
-                <td>${incident.severity}</td>
-                <td>${incident.status}</td>
-                <td>${incident.reportedBy}</td>
-            </tr>
-        `,
-        visitors: (visitor) => `
-            <tr>
-                <td>${visitor.date}</td>
-                <td>${visitor.name}</td>
-                <td>${visitor.nationalId}</td>
-                <td>${visitor.phoneNumber}</td>
-                <td>${visitor.purposeOfVisit}</td>
-            </tr>
-        `,
-        audit: (entry) => `
-            <tr>
-                <td>${entry.date}</td>
-                <td>${entry.actionType}</td>
-                <td>${entry.entityType}</td>
-                <td>${entry.entityId || "-"}</td>
-                <td>${entry.username}</td>
-                <td>${entry.details}</td>
-            </tr>
-        `
-    };
-
-    const colspans = { access: 6, incidents: 7, visitors: 5, audit: 6 };
-
-    table.innerHTML = rows.length
-        ? rows.map(renderers[type] || renderers.access).join("")
-        : tableEmptyRow(colspans[type] || 6, "No records found for the selected date range.");
-}
-
-async function renderAuditTable(rows = []) {
-    const table = document.getElementById("auditTable");
-    if (!table) {
+    if (!rows.length) {
+        const colspan = { access: 6, incidents: 7, visitors: 5, audit: 6 }[type] || 6;
+        target.innerHTML = tableEmptyRow(colspan, "No report data found for that date range.");
         return;
     }
 
-    table.innerHTML = rows.length
-        ? rows.map((entry) => `
+    if (type === "access") {
+        target.innerHTML = rows.map((row) => `
             <tr>
-                <td>${entry.date}</td>
-                <td>${entry.actionType}</td>
-                <td>${entry.entityType}</td>
-                <td>${entry.entityId || "-"}</td>
-                <td>${entry.username}</td>
-                <td>${entry.details}</td>
+                <td>${formatDateLabel(row.date)}</td>
+                <td>${escapeHtml(row.visitorName)}</td>
+                <td>${escapeHtml(row.host)}</td>
+                <td>${escapeHtml(row.entryTime)}</td>
+                <td>${escapeHtml(row.exitTime || "-")}</td>
+                <td>${escapeHtml(row.recordedBy)}</td>
             </tr>
-        `).join("")
-        : tableEmptyRow(6, "No audit entries found for the selected date range.");
+        `).join("");
+        return;
+    }
+
+    if (type === "incidents") {
+        target.innerHTML = rows.map((row) => `
+            <tr>
+                <td>${formatDateLabel(row.date)}</td>
+                <td>${escapeHtml(row.title)}</td>
+                <td>${escapeHtml(row.incidentType)}</td>
+                <td>${escapeHtml(row.location)}</td>
+                <td>${escapeHtml(row.severity)}</td>
+                <td>${escapeHtml(row.status)}</td>
+                <td>${escapeHtml(row.reportedBy)}</td>
+            </tr>
+        `).join("");
+        return;
+    }
+
+    if (type === "visitors") {
+        target.innerHTML = rows.map((row) => `
+            <tr>
+                <td>${formatDateLabel(row.date)}</td>
+                <td>${escapeHtml(row.name)}</td>
+                <td>${escapeHtml(row.nationalId)}</td>
+                <td>${escapeHtml(row.phoneNumber)}</td>
+                <td>${escapeHtml(row.purposeOfVisit)}</td>
+            </tr>
+        `).join("");
+        return;
+    }
+
+    target.innerHTML = rows.map((row) => `
+        <tr>
+            <td>${formatDateLabel(row.date)}</td>
+            <td>${escapeHtml(row.actionType)}</td>
+            <td>${escapeHtml(row.entityType)}</td>
+            <td>${escapeHtml(row.entityId || "-")}</td>
+            <td>${escapeHtml(row.username)}</td>
+            <td>${escapeHtml(row.details)}</td>
+        </tr>
+    `).join("");
+}
+
+// Render audit table
+async function renderAuditTable(rows = []) {
+    const target = document.getElementById("auditTable");
+    if (!target) return;
+
+    if (!rows.length) {
+        target.innerHTML = tableEmptyRow(6, "No audit entries found for that date range.");
+        return;
+    }
+
+    target.innerHTML = rows.map((row) => `
+        <tr>
+            <td>${formatDateLabel(row.date)}</td>
+            <td>${escapeHtml(row.actionType)}</td>
+            <td>${escapeHtml(row.entityType)}</td>
+            <td>${escapeHtml(row.entityId || "-")}</td>
+            <td>${escapeHtml(row.username)}</td>
+            <td>${escapeHtml(row.details)}</td>
+        </tr>
+    `).join("");
 }
 
 // ---------------------------------------------------------------------
-// Row action bindings for edit/delete flows
+// Row actions (edit/delete)
 // ---------------------------------------------------------------------
+
 function bindUserRowActions(users) {
     document.querySelectorAll("[data-edit-user]").forEach((button) => {
         button.addEventListener("click", () => {
-            const userId = Number(button.getAttribute("data-edit-user"));
-            const user = users.find((item) => item.userId === userId);
-            if (!user) {
-                return;
-            }
+            const userId = Number(button.dataset.editUser);
+            const user = users.find((entry) => entry.userId === userId);
+            if (!user) return;
 
-            document.getElementById("editUserId").value = String(user.userId);
-            document.getElementById("editUsername").value = user.username;
-            document.getElementById("editRole").value = user.role;
-            document.getElementById("editPassword").value = "";
-            message("userMessage", `Editing ${user.username}. Update the fields and save changes.`);
+            const userIdField = document.getElementById("editUserId");
+            const usernameField = document.getElementById("editUsername");
+            const passwordField = document.getElementById("editPassword");
+            const roleField = document.getElementById("editRole");
+
+            if (userIdField) userIdField.value = String(user.userId);
+            if (usernameField) usernameField.value = user.username;
+            if (passwordField) passwordField.value = "";
+            if (roleField) roleField.value = user.role;
+
+            message("userMessage", `Editing user "${user.username}".`);
         });
     });
 
     document.querySelectorAll("[data-delete-user]").forEach((button) => {
         button.addEventListener("click", async () => {
-            const session = getSession();
-            const targetUserId = button.getAttribute("data-delete-user");
+            const userId = Number(button.dataset.deleteUser);
+            const user = users.find((entry) => entry.userId === userId);
+            if (!user) return;
 
-            if (!window.confirm("Delete this user account?")) {
-                return;
-            }
+            const confirmed = window.confirm(`Delete user "${user.username}"?`);
+            if (!confirmed) return;
 
             try {
                 await api("/api/users/delete", {
                     method: "POST",
                     headers: {
-                        "Content-Type": "application/x-www-form-urlencoded"
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                     },
-                    body: formBody({
-                        targetUserId
-                    })
+                    body: formBody({ targetUserId: userId })
                 });
 
+                message("userMessage", `User "${user.username}" deleted successfully.`);
                 await renderUsersTable();
-                message("userMessage", "User deleted successfully.");
             } catch (error) {
-                message("userMessage", error.message, true);
+                message("userMessage", error.message || "Failed to delete user.", true);
             }
         });
     });
 }
-
 function bindVisitorRowActions(visitors) {
     document.querySelectorAll("[data-edit-visitor]").forEach((button) => {
         button.addEventListener("click", () => {
-            const visitorId = Number(button.getAttribute("data-edit-visitor"));
-            const visitor = visitors.find((item) => item.id === visitorId);
-            if (!visitor) {
-                return;
-            }
+            const visitor = visitors.find((entry) => entry.id === Number(button.dataset.editVisitor));
+            if (!visitor) return;
 
             document.getElementById("editVisitorId").value = String(visitor.id);
             document.getElementById("editVisitorName").value = visitor.name;
             document.getElementById("editVisitorNationalId").value = visitor.nationalId;
             document.getElementById("editVisitorPhoneNumber").value = visitor.phoneNumber;
             document.getElementById("editVisitorPurposeOfVisit").value = visitor.purposeOfVisit;
-            message("visitorMessage", `Editing ${visitor.name}. Update the details and save changes.`);
+
+            message("visitorMessage", `Editing visitor "${visitor.name}".`);
         });
     });
 
     document.querySelectorAll("[data-delete-visitor]").forEach((button) => {
         button.addEventListener("click", async () => {
-            const visitorId = button.getAttribute("data-delete-visitor");
+            const visitor = visitors.find((entry) => entry.id === Number(button.dataset.deleteVisitor));
+            if (!visitor) return;
 
-            if (!window.confirm("Delete this visitor record?")) {
+            if (!window.confirm(`Delete visitor "${visitor.name}"?`)) {
                 return;
             }
 
@@ -683,44 +672,39 @@ function bindVisitorRowActions(visitors) {
                 await api("/api/visitors/delete", {
                     method: "POST",
                     headers: {
-                        "Content-Type": "application/x-www-form-urlencoded"
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                     },
-                    body: formBody({
-                        visitorId
-                    })
+                    body: formBody({ visitorId: visitor.id })
                 });
-
+                message("visitorMessage", `Visitor "${visitor.name}" deleted successfully.`);
                 await renderVisitorTable();
-                message("visitorMessage", "Visitor deleted successfully.");
             } catch (error) {
-                message("visitorMessage", error.message, true);
+                message("visitorMessage", error.message || "Failed to delete visitor.", true);
             }
         });
     });
 }
-
 function bindEmployeeRowActions(employees) {
     document.querySelectorAll("[data-edit-employee]").forEach((button) => {
         button.addEventListener("click", () => {
-            const employeeId = Number(button.getAttribute("data-edit-employee"));
-            const employee = employees.find((item) => item.id === employeeId);
-            if (!employee) {
-                return;
-            }
+            const employee = employees.find((entry) => entry.id === Number(button.dataset.editEmployee));
+            if (!employee) return;
 
             document.getElementById("editEmployeeId").value = String(employee.id);
             document.getElementById("editEmployeeName").value = employee.name;
             document.getElementById("editEmployeeDepartment").value = employee.department;
             document.getElementById("editEmployeePhone").value = employee.phoneNumber || "";
-            message("employeeMessage", `Editing ${employee.name}. Update the fields and save changes.`);
+
+            message("employeeMessage", `Editing employee "${employee.name}".`);
         });
     });
 
     document.querySelectorAll("[data-delete-employee]").forEach((button) => {
         button.addEventListener("click", async () => {
-            const employeeId = button.getAttribute("data-delete-employee");
+            const employee = employees.find((entry) => entry.id === Number(button.dataset.deleteEmployee));
+            if (!employee) return;
 
-            if (!window.confirm("Delete this employee record?")) {
+            if (!window.confirm(`Delete employee "${employee.name}"?`)) {
                 return;
             }
 
@@ -728,176 +712,41 @@ function bindEmployeeRowActions(employees) {
                 await api("/api/employees/delete", {
                     method: "POST",
                     headers: {
-                        "Content-Type": "application/x-www-form-urlencoded"
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                     },
-                    body: formBody({
-                        employeeId
-                    })
+                    body: formBody({ employeeId: employee.id })
                 });
-
+                message("employeeMessage", `Employee "${employee.name}" deleted successfully.`);
                 await renderEmployeesTable();
-                message("employeeMessage", "Employee deleted successfully.");
             } catch (error) {
-                message("employeeMessage", error.message, true);
+                message("employeeMessage", error.message || "Failed to delete employee.", true);
             }
         });
     });
 }
-
-// ---------------------------------------------------------------------
-// Form bindings for each page
-// ---------------------------------------------------------------------
-function bindLogin() {
-    const form = document.getElementById("loginForm");
-    if (!form) {
-        return;
-    }
-
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const username = document.getElementById("username").value.trim();
-        const password = document.getElementById("password").value.trim();
-
-        if (!username || !password) {
-            message("loginMessage", "Enter both username and password to continue.", true);
-            return;
-        }
-
-        try {
-            const session = await api("/api/login", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({ username, password })
-            });
-
-            setSession(session);
-            message("loginMessage", "Sign-in successful. Redirecting...");
-            window.setTimeout(() => {
-                window.location.href = "dashboard.html";
-            }, 300);
-        } catch (error) {
-            message("loginMessage", error.message, true);
-        }
-    });
-}
-
-function bindVisitorForm() {
-    const form = document.getElementById("visitorForm");
-    if (!form) {
-        return;
-    }
-
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const session = getSession();
-
-        try {
-            await api("/api/visitors", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({
-                    name: document.getElementById("name").value.trim(),
-                    nationalId: document.getElementById("nationalId").value.trim(),
-                    phoneNumber: document.getElementById("phoneNumber").value.trim(),
-                    purposeOfVisit: document.getElementById("purposeOfVisit").value.trim()
-                })
-            });
-
-            form.reset();
-            await renderVisitorTable();
-            message("visitorMessage", "Visitor registered successfully.");
-        } catch (error) {
-            message("visitorMessage", error.message, true);
-        }
-    });
-}
-
-function bindAccessForms() {
-    const entryForm = document.getElementById("entryForm");
-    const exitForm = document.getElementById("exitForm");
-
-    if (entryForm) {
-        entryForm.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            const session = getSession();
-
-            try {
-                await api("/api/access-logs/entry", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded"
-                    },
-                    body: formBody({
-                        visitorId: document.getElementById("visitorId").value,
-                        employeeId: document.getElementById("employeeId").value
-                    })
-                });
-
-                entryForm.reset();
-                await renderAccessSelects();
-                await renderAccessTable();
-                message("accessMessage", "Entry recorded successfully.");
-            } catch (error) {
-                message("accessMessage", error.message, true);
-            }
-        });
-    }
-
-    if (exitForm) {
-        exitForm.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            const session = getSession();
-
-            try {
-                await api("/api/access-logs/exit", {
-                    method: "POST",
-                    headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                    },
-                    body: formBody({
-                        visitorId: document.getElementById("exitVisitorId").value
-                    })
-                });
-
-                exitForm.reset();
-                await renderAccessSelects();
-                await renderAccessTable();
-                message("accessMessage", "Exit recorded successfully.");
-            } catch (error) {
-                message("accessMessage", error.message, true);
-            }
-        });
-    }
-}
-
 function bindAccessRowActions(logs) {
     document.querySelectorAll("[data-edit-access]").forEach((button) => {
         button.addEventListener("click", () => {
-            const logId = Number(button.getAttribute("data-edit-access"));
-            const log = logs.find((item) => item.id === logId);
-            if (!log) {
-                return;
-            }
+            const log = logs.find((entry) => entry.id === Number(button.dataset.editAccess));
+            if (!log) return;
 
             document.getElementById("editLogId").value = String(log.id);
             document.getElementById("editVisitorId").value = String(log.visitorId);
             document.getElementById("editEmployeeId").value = String(log.employeeId);
             document.getElementById("editVisitDate").value = log.date;
-            document.getElementById("editEntryTime").value = String(log.entryTime).slice(0, 5);
+            document.getElementById("editEntryTime").value = String(log.entryTime || "").slice(0, 5);
             document.getElementById("editExitTime").value = log.exitTime ? String(log.exitTime).slice(0, 5) : "";
-            message("accessMessage", `Editing access record #${log.id}. Update the fields and save changes.`);
+
+            message("accessMessage", `Editing access record for "${log.visitorName}".`);
         });
     });
 
     document.querySelectorAll("[data-delete-access]").forEach((button) => {
         button.addEventListener("click", async () => {
-            const logId = button.getAttribute("data-delete-access");
+            const log = logs.find((entry) => entry.id === Number(button.dataset.deleteAccess));
+            if (!log) return;
 
-            if (!window.confirm("Delete this access record?")) {
+            if (!window.confirm(`Delete access record for "${log.visitorName}" on ${log.date}?`)) {
                 return;
             }
 
@@ -905,67 +754,23 @@ function bindAccessRowActions(logs) {
                 await api("/api/access-logs/delete", {
                     method: "POST",
                     headers: {
-                        "Content-Type": "application/x-www-form-urlencoded"
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                     },
-                    body: formBody({
-                        logId
-                    })
+                    body: formBody({ logId: log.id })
                 });
-
-                await renderAccessSelects();
-                await renderAccessTable();
                 message("accessMessage", "Access record deleted successfully.");
+                await Promise.all([renderAccessSelects(), renderAccessTable()]);
             } catch (error) {
-                message("accessMessage", error.message, true);
+                message("accessMessage", error.message || "Failed to delete access record.", true);
             }
         });
     });
 }
-
-function bindIncidentForm() {
-    const form = document.getElementById("incidentForm");
-    if (!form) {
-        return;
-    }
-
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const session = getSession();
-
-        try {
-            await api("/api/incidents", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({
-                    title: document.getElementById("title").value.trim(),
-                    incidentType: document.getElementById("incidentType").value,
-                    location: document.getElementById("location").value.trim(),
-                    severity: document.getElementById("severity").value,
-                    status: document.getElementById("status").value,
-                    actionTaken: document.getElementById("actionTaken").value.trim(),
-                    description: document.getElementById("description").value.trim()
-                })
-            });
-
-            form.reset();
-            await renderIncidentTable();
-            message("incidentMessage", "Incident report saved successfully.");
-        } catch (error) {
-            message("incidentMessage", error.message, true);
-        }
-    });
-}
-
 function bindIncidentRowActions(incidents) {
     document.querySelectorAll("[data-edit-incident]").forEach((button) => {
         button.addEventListener("click", () => {
-            const incidentId = Number(button.getAttribute("data-edit-incident"));
-            const incident = incidents.find((item) => item.id === incidentId);
-            if (!incident) {
-                return;
-            }
+            const incident = incidents.find((entry) => entry.id === Number(button.dataset.editIncident));
+            if (!incident) return;
 
             document.getElementById("editIncidentId").value = String(incident.id);
             document.getElementById("editTitle").value = incident.title;
@@ -975,23 +780,345 @@ function bindIncidentRowActions(incidents) {
             document.getElementById("editStatus").value = incident.status;
             document.getElementById("editDescription").value = incident.description;
             document.getElementById("editActionTaken").value = incident.actionTaken || "";
-            message("incidentMessage", `Editing incident #${incident.id}. Update the fields and save your changes.`);
-            document.getElementById("incidentEditForm").scrollIntoView({ behavior: "smooth", block: "start" });
+
+            message("incidentMessage", `Editing incident "${incident.title}".`);
         });
     });
 }
 
-function bindIncidentEditForm() {
-    const form = document.getElementById("incidentEditForm");
-    if (!form) {
-        return;
-    }
+// ---------------------------------------------------------------------
+// Form bindings
+// ---------------------------------------------------------------------
+
+function bindLogin() {
+    const form = document.getElementById("loginForm");
+    if (!form) return;
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
 
-        if (!document.getElementById("editIncidentId").value) {
-            message("incidentMessage", "Select an incident from the log before saving changes.", true);
+        const formData = new FormData(form);
+        const username = String(formData.get("username") || "").trim();
+        const password = String(formData.get("password") || "").trim();
+
+        if (!username || !password) {
+            message("loginMessage", "Enter both username and password.", true);
+            return;
+        }
+
+        try {
+            const session = await api("/api/login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                },
+                body: formBody({ username, password })
+            });
+
+            setSession(session);
+            message("loginMessage", "Login successful. Redirecting...");
+            window.location.href = "dashboard.html";
+        } catch (error) {
+            clearSession();
+            message("loginMessage", error.message || "Login failed.", true);
+        }
+    });
+}
+function bindUserForms() {
+    const createForm = document.getElementById("userCreateForm");
+    if (createForm) {
+        createForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const username = document.getElementById("newUsername")?.value.trim() || "";
+            const password = document.getElementById("newPassword")?.value.trim() || "";
+            const role = document.getElementById("newRole")?.value || "";
+
+            if (!username || !password || !role) {
+                message("userMessage", "All user fields are required.", true);
+                return;
+            }
+
+            try {
+                await api("/api/users", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ username, password, role })
+                });
+
+                createForm.reset();
+                message("userMessage", `User "${username}" created successfully.`);
+                await renderUsersTable();
+            } catch (error) {
+                message("userMessage", error.message || "Failed to create user.", true);
+            }
+        });
+    }
+
+    const editForm = document.getElementById("userEditForm");
+    if (editForm) {
+        editForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const targetUserId = document.getElementById("editUserId")?.value || "";
+            const username = document.getElementById("editUsername")?.value.trim() || "";
+            const password = document.getElementById("editPassword")?.value.trim() || "";
+            const role = document.getElementById("editRole")?.value || "";
+
+            if (!targetUserId) {
+                message("userMessage", "Select a user to edit first.", true);
+                return;
+            }
+
+            if (!username || !role) {
+                message("userMessage", "Username and role are required.", true);
+                return;
+            }
+
+            try {
+                const result = await api("/api/users/update", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ targetUserId, username, password, role })
+                });
+
+                editForm.reset();
+                const hiddenIdField = document.getElementById("editUserId");
+                if (hiddenIdField) hiddenIdField.value = "";
+
+                if (result.updatedCurrentUser) {
+                    clearSession();
+                    message("userMessage", "Your account changed. Please sign in again.");
+                    window.location.href = "login.html";
+                    return;
+                }
+
+                const suffix = result.sessionRevoked ? " Active sessions were revoked." : "";
+                message("userMessage", `User "${username}" updated successfully.${suffix}`);
+                await renderUsersTable();
+            } catch (error) {
+                message("userMessage", error.message || "Failed to update user.", true);
+            }
+        });
+    }
+}
+function bindVisitorForm() {
+    const createForm = document.getElementById("visitorForm");
+    if (createForm) {
+        createForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const name = document.getElementById("name")?.value.trim() || "";
+            const nationalId = document.getElementById("nationalId")?.value.trim() || "";
+            const phoneNumber = document.getElementById("phoneNumber")?.value.trim() || "";
+            const purposeOfVisit = document.getElementById("purposeOfVisit")?.value.trim() || "";
+
+            if (!name || !nationalId || !phoneNumber || !purposeOfVisit) {
+                message("visitorMessage", "All visitor fields are required.", true);
+                return;
+            }
+
+            try {
+                await api("/api/visitors", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ name, nationalId, phoneNumber, purposeOfVisit })
+                });
+                createForm.reset();
+                message("visitorMessage", `Visitor "${name}" registered successfully.`);
+                await renderVisitorTable();
+            } catch (error) {
+                message("visitorMessage", error.message || "Failed to save visitor.", true);
+            }
+        });
+    }
+
+    const editForm = document.getElementById("visitorEditForm");
+    if (editForm) {
+        editForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const visitorId = document.getElementById("editVisitorId")?.value || "";
+            const name = document.getElementById("editVisitorName")?.value.trim() || "";
+            const nationalId = document.getElementById("editVisitorNationalId")?.value.trim() || "";
+            const phoneNumber = document.getElementById("editVisitorPhoneNumber")?.value.trim() || "";
+            const purposeOfVisit = document.getElementById("editVisitorPurposeOfVisit")?.value.trim() || "";
+
+            if (!visitorId) {
+                message("visitorMessage", "Select a visitor to edit first.", true);
+                return;
+            }
+
+            try {
+                await api("/api/visitors/update", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ visitorId, name, nationalId, phoneNumber, purposeOfVisit })
+                });
+                editForm.reset();
+                document.getElementById("editVisitorId").value = "";
+                message("visitorMessage", `Visitor "${name}" updated successfully.`);
+                await renderVisitorTable();
+            } catch (error) {
+                message("visitorMessage", error.message || "Failed to update visitor.", true);
+            }
+        });
+    }
+}
+function bindAccessForms() {
+    const entryForm = document.getElementById("entryForm");
+    if (entryForm) {
+        entryForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const visitorId = document.getElementById("visitorId")?.value || "";
+            const employeeId = document.getElementById("employeeId")?.value || "";
+
+            if (!visitorId || !employeeId) {
+                message("accessMessage", "Select both visitor and host employee.", true);
+                return;
+            }
+
+            try {
+                await api("/api/access-logs/entry", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ visitorId, employeeId })
+                });
+                entryForm.reset();
+                message("accessMessage", "Visitor entry recorded successfully.");
+                await Promise.all([renderAccessSelects(), renderAccessTable()]);
+            } catch (error) {
+                message("accessMessage", error.message || "Failed to record entry.", true);
+            }
+        });
+    }
+
+    const exitForm = document.getElementById("exitForm");
+    if (exitForm) {
+        exitForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const visitorId = document.getElementById("exitVisitorId")?.value || "";
+
+            if (!visitorId) {
+                message("accessMessage", "Select a visitor to record exit.", true);
+                return;
+            }
+
+            try {
+                await api("/api/access-logs/exit", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ visitorId })
+                });
+                exitForm.reset();
+                message("accessMessage", "Visitor exit recorded successfully.");
+                await Promise.all([renderAccessSelects(), renderAccessTable()]);
+            } catch (error) {
+                message("accessMessage", error.message || "Failed to record exit.", true);
+            }
+        });
+    }
+
+    const editForm = document.getElementById("accessEditForm");
+    if (editForm) {
+        editForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const logId = document.getElementById("editLogId")?.value || "";
+            const visitorId = document.getElementById("editVisitorId")?.value || "";
+            const employeeId = document.getElementById("editEmployeeId")?.value || "";
+            const visitDate = document.getElementById("editVisitDate")?.value || "";
+            const entryTime = document.getElementById("editEntryTime")?.value || "";
+            const exitTime = document.getElementById("editExitTime")?.value || "";
+
+            if (!logId) {
+                message("accessMessage", "Select an access record to edit first.", true);
+                return;
+            }
+
+            try {
+                await api("/api/access-logs/update", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ logId, visitorId, employeeId, visitDate, entryTime, exitTime })
+                });
+                editForm.reset();
+                document.getElementById("editLogId").value = "";
+                message("accessMessage", "Access record updated successfully.");
+                await Promise.all([renderAccessSelects(), renderAccessTable()]);
+            } catch (error) {
+                message("accessMessage", error.message || "Failed to update access record.", true);
+            }
+        });
+    }
+}
+function bindIncidentForm() {
+    const form = document.getElementById("incidentForm");
+    if (!form) return;
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const title = document.getElementById("title")?.value.trim() || "";
+        const incidentType = document.getElementById("incidentType")?.value || "";
+        const location = document.getElementById("location")?.value.trim() || "";
+        const severity = document.getElementById("severity")?.value || "";
+        const status = document.getElementById("status")?.value || "";
+        const description = document.getElementById("description")?.value.trim() || "";
+        const actionTaken = document.getElementById("actionTaken")?.value.trim() || "";
+
+        if (!title || !incidentType || !location || !severity || !status || !description) {
+            message("incidentMessage", "All incident fields are required.", true);
+            return;
+        }
+
+        try {
+            await api("/api/incidents", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                },
+                body: formBody({ title, incidentType, location, severity, status, description, actionTaken })
+            });
+            form.reset();
+            message("incidentMessage", `Incident "${title}" saved successfully.`);
+            await renderIncidentTable();
+        } catch (error) {
+            message("incidentMessage", error.message || "Failed to save incident.", true);
+        }
+    });
+}
+function bindIncidentEditForm() {
+    const form = document.getElementById("incidentEditForm");
+    if (!form) return;
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const incidentId = document.getElementById("editIncidentId")?.value || "";
+        const title = document.getElementById("editTitle")?.value.trim() || "";
+        const incidentType = document.getElementById("editIncidentType")?.value || "";
+        const location = document.getElementById("editLocation")?.value.trim() || "";
+        const severity = document.getElementById("editSeverity")?.value || "";
+        const status = document.getElementById("editStatus")?.value || "";
+        const description = document.getElementById("editDescription")?.value.trim() || "";
+        const actionTaken = document.getElementById("editActionTaken")?.value.trim() || "";
+
+        if (!incidentId) {
+            message("incidentMessage", "Select an incident to edit first.", true);
             return;
         }
 
@@ -999,437 +1126,265 @@ function bindIncidentEditForm() {
             await api("/api/incidents/update", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                 },
-                body: formBody({
-                    incidentId: document.getElementById("editIncidentId").value,
-                    title: document.getElementById("editTitle").value.trim(),
-                    incidentType: document.getElementById("editIncidentType").value,
-                    location: document.getElementById("editLocation").value.trim(),
-                    severity: document.getElementById("editSeverity").value,
-                    status: document.getElementById("editStatus").value,
-                    actionTaken: document.getElementById("editActionTaken").value.trim(),
-                    description: document.getElementById("editDescription").value.trim()
-                })
+                body: formBody({ incidentId, title, incidentType, location, severity, status, description, actionTaken })
             });
-
             form.reset();
             document.getElementById("editIncidentId").value = "";
+            message("incidentMessage", `Incident "${title}" updated successfully.`);
             await renderIncidentTable();
-            message("incidentMessage", "Incident updated successfully.");
         } catch (error) {
-            message("incidentMessage", error.message, true);
+            message("incidentMessage", error.message || "Failed to update incident.", true);
         }
     });
 }
-
 function bindIncidentFilters() {
-    const form = document.getElementById("incidentFilterForm");
-    const resetButton = document.getElementById("resetIncidentFilters");
-    if (!form) {
-        return;
-    }
-
-    form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        filterIncidents();
-    });
-
-    if (resetButton) {
-        resetButton.addEventListener("click", () => {
-            form.reset();
-            renderIncidentRows(incidentCache);
-            message("incidentMessage", "Incident filters cleared.");
+    const filterForm = document.getElementById("incidentFilterForm");
+    if (filterForm) {
+        filterForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            filterIncidents();
         });
     }
-}
 
-function bindUserForms() {
-    const createForm = document.getElementById("userCreateForm");
-    const editForm = document.getElementById("userEditForm");
-    if (!createForm || !editForm) {
-        return;
-    }
-
-    createForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const session = getSession();
-
-        try {
-            await api("/api/users", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({
-                    username: document.getElementById("newUsername").value.trim(),
-                    password: document.getElementById("newPassword").value.trim(),
-                    role: document.getElementById("newRole").value
-                })
-            });
-
-            createForm.reset();
-            await renderUsersTable();
-            message("userMessage", "User created successfully.");
-        } catch (error) {
-            message("userMessage", error.message, true);
+    document.getElementById("resetIncidentFilters")?.addEventListener("click", () => {
+        if (filterForm) {
+            filterForm.reset();
         }
-    });
-
-    editForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const session = getSession();
-        const targetUserId = Number(document.getElementById("editUserId").value);
-
-        try {
-            const result = await api("/api/users/update", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({
-                    targetUserId: String(targetUserId),
-                    username: document.getElementById("editUsername").value.trim(),
-                    password: document.getElementById("editPassword").value.trim(),
-                    role: document.getElementById("editRole").value
-                })
-            });
-
-            editForm.reset();
-            document.getElementById("editUserId").value = "";
-            await renderUsersTable();
-            message("userMessage", result.message || "User updated successfully.");
-            if (result.sessionRevoked && result.updatedCurrentUser && session && targetUserId === session.userId) {
-                clearSession();
-                window.setTimeout(() => {
-                    window.location.href = "login.html";
-                }, 500);
-            }
-        } catch (error) {
-            message("userMessage", error.message, true);
-        }
-    });
-}
-
-function bindVisitorEditForm() {
-    const form = document.getElementById("visitorEditForm");
-    if (!form) {
-        return;
-    }
-
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-
-        try {
-            await api("/api/visitors/update", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({
-                    visitorId: document.getElementById("editVisitorId").value,
-                    name: document.getElementById("editVisitorName").value.trim(),
-                    nationalId: document.getElementById("editVisitorNationalId").value.trim(),
-                    phoneNumber: document.getElementById("editVisitorPhoneNumber").value.trim(),
-                    purposeOfVisit: document.getElementById("editVisitorPurposeOfVisit").value.trim()
-                })
-            });
-
-            form.reset();
-            document.getElementById("editVisitorId").value = "";
-            await renderVisitorTable();
-            await renderAccessSelects();
-            message("visitorMessage", "Visitor updated successfully.");
-        } catch (error) {
-            message("visitorMessage", error.message, true);
-        }
-    });
-}
-
-function bindAccessEditForm() {
-    const form = document.getElementById("accessEditForm");
-    if (!form) {
-        return;
-    }
-
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-
-        try {
-            await api("/api/access-logs/update", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({
-                    logId: document.getElementById("editLogId").value,
-                    visitorId: document.getElementById("editVisitorId").value,
-                    employeeId: document.getElementById("editEmployeeId").value,
-                    visitDate: document.getElementById("editVisitDate").value,
-                    entryTime: document.getElementById("editEntryTime").value,
-                    exitTime: document.getElementById("editExitTime").value
-                })
-            });
-
-            form.reset();
-            document.getElementById("editLogId").value = "";
-            await renderAccessSelects();
-            await renderAccessTable();
-            message("accessMessage", "Access record updated successfully.");
-        } catch (error) {
-            message("accessMessage", error.message, true);
-        }
+        renderIncidentRows(incidentCache);
     });
 }
 
 function bindEmployeeForms() {
     const createForm = document.getElementById("employeeCreateForm");
+    if (createForm) {
+        createForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const name = document.getElementById("employeeName")?.value.trim() || "";
+            const department = document.getElementById("employeeDepartment")?.value.trim() || "";
+            const phoneNumber = document.getElementById("employeePhone")?.value.trim() || "";
+
+            if (!name || !department) {
+                message("employeeMessage", "Employee name and department are required.", true);
+                return;
+            }
+
+            try {
+                await api("/api/employees/create", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ name, department, phoneNumber })
+                });
+                createForm.reset();
+                message("employeeMessage", `Employee "${name}" created successfully.`);
+                await renderEmployeesTable();
+            } catch (error) {
+                message("employeeMessage", error.message || "Failed to create employee.", true);
+            }
+        });
+    }
+
     const editForm = document.getElementById("employeeEditForm");
-    if (!createForm || !editForm) {
-        return;
-    }
+    if (editForm) {
+        editForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const employeeId = document.getElementById("editEmployeeId")?.value || "";
+            const name = document.getElementById("editEmployeeName")?.value.trim() || "";
+            const department = document.getElementById("editEmployeeDepartment")?.value.trim() || "";
+            const phoneNumber = document.getElementById("editEmployeePhone")?.value.trim() || "";
 
-    createForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-
-        try {
-            await api("/api/employees/create", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({
-                    name: document.getElementById("employeeName").value.trim(),
-                    department: document.getElementById("employeeDepartment").value.trim(),
-                    phoneNumber: document.getElementById("employeePhone").value.trim()
-                })
-            });
-
-            createForm.reset();
-            await renderEmployeesTable();
-            message("employeeMessage", "Employee created successfully.");
-        } catch (error) {
-            message("employeeMessage", error.message, true);
-        }
-    });
-
-    editForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-
-        try {
-            await api("/api/employees/update", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: formBody({
-                    employeeId: document.getElementById("editEmployeeId").value,
-                    name: document.getElementById("editEmployeeName").value.trim(),
-                    department: document.getElementById("editEmployeeDepartment").value.trim(),
-                    phoneNumber: document.getElementById("editEmployeePhone").value.trim()
-                })
-            });
-
-            editForm.reset();
-            document.getElementById("editEmployeeId").value = "";
-            await renderEmployeesTable();
-            await renderAccessSelects();
-            message("employeeMessage", "Employee updated successfully.");
-        } catch (error) {
-            message("employeeMessage", error.message, true);
-        }
-    });
-}
-
-// Reports and audit screens share the same date-driven pattern, but point to different endpoints.
-function bindReportForm() {
-    const form = document.getElementById("reportForm");
-    const exportButton = document.getElementById("exportReport");
-    if (!form) {
-        return;
-    }
-
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const reportType = document.getElementById("reportType").value;
-        const startDate = document.getElementById("reportStartDate").value;
-        const endDate = document.getElementById("reportEndDate").value;
-
-        if (!startDate || !endDate) {
-            message("reportMessage", "Select both start date and end date.", true);
-            return;
-        }
-
-        if (startDate > endDate) {
-            message("reportMessage", "Start date cannot be after end date.", true);
-            return;
-        }
-
-        try {
-            const loaders = {
-                access: loadAccessReport,
-                incidents: loadIncidentReport,
-                visitors: loadVisitorReport,
-                audit: loadAuditReport
-            };
-            const rows = await (loaders[reportType] || loadAccessReport)(startDate, endDate);
-            await renderReportsTable(rows, reportType);
-            message("reportMessage", `Report generated successfully. ${rows.length} record(s) found.`);
-        } catch (error) {
-            message("reportMessage", error.message, true);
-        }
-    });
-
-    if (exportButton) {
-        exportButton.addEventListener("click", () => {
-            const reportType = document.getElementById("reportType").value;
-            const startDate = document.getElementById("reportStartDate").value;
-            const endDate = document.getElementById("reportEndDate").value;
-
-            if (!startDate || !endDate) {
-                message("reportMessage", "Select both start date and end date before exporting.", true);
+            if (!employeeId) {
+                message("employeeMessage", "Select an employee to edit first.", true);
                 return;
             }
 
-            if (startDate > endDate) {
-                message("reportMessage", "Start date cannot be after end date.", true);
-                return;
+            try {
+                await api("/api/employees/update", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                    },
+                    body: formBody({ employeeId, name, department, phoneNumber })
+                });
+                editForm.reset();
+                document.getElementById("editEmployeeId").value = "";
+                message("employeeMessage", `Employee "${name}" updated successfully.`);
+                await renderEmployeesTable();
+            } catch (error) {
+                message("employeeMessage", error.message || "Failed to update employee.", true);
             }
-
-            window.location.href = `/api/reports/export?type=${encodeURIComponent(reportType)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
         });
     }
 }
 
-function bindAuditForm() {
-    const form = document.getElementById("auditForm");
-    const exportButton = document.getElementById("exportAuditHistory");
-    if (!form) {
-        return;
-    }
-
-    const range = defaultAuditRange();
-    document.getElementById("auditStartDate").value = range.startDate;
-    document.getElementById("auditEndDate").value = range.endDate;
+function bindReports() {
+    const form = document.getElementById("reportForm");
+    const typeField = document.getElementById("reportType");
+    const startField = document.getElementById("reportStartDate");
+    const endField = document.getElementById("reportEndDate");
+    if (!form || !typeField || !startField || !endField) return;
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
-        const startDate = document.getElementById("auditStartDate").value;
-        const endDate = document.getElementById("auditEndDate").value;
+        const type = typeField.value;
+        const startDate = startField.value;
+        const endDate = endField.value;
 
+        try {
+            const rows = await api(reportEndpoint(type, startDate, endDate));
+            await renderReportsTable(rows, type);
+            message("reportMessage", `Loaded ${type} report successfully.`);
+        } catch (error) {
+            message("reportMessage", error.message || "Failed to load report.", true);
+        }
+    });
+
+    document.getElementById("exportReport")?.addEventListener("click", () => {
+        const type = typeField.value;
+        const startDate = startField.value;
+        const endDate = endField.value;
         if (!startDate || !endDate) {
-            message("auditMessage", "Select both start date and end date.", true);
+            message("reportMessage", "Select both start and end dates before exporting.", true);
             return;
         }
+        window.location.href = `/api/reports/export?type=${encodeURIComponent(type)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+    });
+}
 
-        if (startDate > endDate) {
-            message("auditMessage", "Start date cannot be after end date.", true);
-            return;
-        }
+function bindAuditHistory() {
+    const form = document.getElementById("auditForm");
+    const startField = document.getElementById("auditStartDate");
+    const endField = document.getElementById("auditEndDate");
+    if (!form || !startField || !endField) return;
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const startDate = startField.value;
+        const endDate = endField.value;
 
         try {
             const rows = await loadAuditReport(startDate, endDate);
             await renderAuditTable(rows);
-            message("auditMessage", `Audit history loaded successfully. ${rows.length} record(s) found.`);
+            message("auditMessage", "Audit history loaded successfully.");
         } catch (error) {
-            message("auditMessage", error.message, true);
+            message("auditMessage", error.message || "Failed to load audit history.", true);
         }
     });
 
-    if (exportButton) {
-        exportButton.addEventListener("click", () => {
-            const startDate = document.getElementById("auditStartDate").value;
-            const endDate = document.getElementById("auditEndDate").value;
-
-            if (!startDate || !endDate) {
-                message("auditMessage", "Select both start date and end date before exporting.", true);
-                return;
-            }
-
-            window.location.href = `/api/reports/export?type=audit&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
-        });
-    }
+    document.getElementById("exportAuditHistory")?.addEventListener("click", () => {
+        const startDate = startField.value;
+        const endDate = endField.value;
+        if (!startDate || !endDate) {
+            message("auditMessage", "Select both start and end dates before exporting.", true);
+            return;
+        }
+        window.location.href = `/api/reports/export?type=audit&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+    });
 }
 
-async function initializePage(page) {
-    // Page-specific setup is centralized here so each HTML file only needs a data-page attribute.
-    switch (page) {
-        case "dashboard":
-            await renderDashboard();
-            break;
-        case "visitor-registration":
-            bindVisitorForm();
-            bindVisitorEditForm();
-            await renderVisitorTable();
-            break;
-        case "access-control":
-            bindAccessForms();
-            bindAccessEditForm();
-            await renderAccessSelects();
-            await renderAccessTable();
-            break;
-        case "incident-report":
-            bindIncidentForm();
-            bindIncidentEditForm();
-            bindIncidentFilters();
-            await renderIncidentTable();
-            break;
-        case "users":
-            bindUserForms();
-            await renderUsersTable();
-            break;
-        case "employees":
-            bindEmployeeForms();
-            await renderEmployeesTable();
-            break;
-        case "reports":
-            bindReportForm();
-            await renderReportsTable([], "access");
-            break;
-        case "audit-history":
-            bindAuditForm();
-            await renderAuditTable([]);
-            document.getElementById("auditForm").dispatchEvent(new Event("submit"));
-            break;
-        case "login":
-            bindLogin();
-            break;
-        case "index":
-            window.setTimeout(() => {
-                window.location.href = "login.html";
-            }, 200);
-            break;
-        default:
-            break;
+// ---------------------------------------------------------------------
+// Page bootstrapping
+// ---------------------------------------------------------------------
+
+async function restoreSession() {
+    try {
+        const session = await api("/api/session");
+        setSession(session);
+        return session;
+    } catch (_error) {
+        clearSession();
+        return null;
     }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-    const page = document.body.dataset.page || "";
+    const page = document.body?.dataset?.page || "";
 
+    // ❌ Disable auto-login completely
+    let session = await restoreSession();
+
+    // ✅ LOGIN PAGE (always accessible, no redirect)
+    if (page === "login") {
+        bindLogin();
+        return;
+    }
+
+    // ✅ Protect all other pages
+    if (!protectRoute(page)) {
+        return;
+    }
+
+    applyRolePermissions();
     bindLogout();
 
-    try {
+    if (page === "users") {
+        bindUserForms();
+        await renderUsersTable();
+        return;
+    }
+
+    if (page === "employees") {
+        bindEmployeeForms();
+        await renderEmployeesTable();
+        return;
+    }
+
+    if (page === "visitor-registration") {
+        bindVisitorForm();
+        await renderVisitorTable();
+        return;
+    }
+
+    if (page === "access-control") {
+        bindAccessForms();
+        await Promise.all([renderAccessSelects(), renderAccessTable()]);
+        return;
+    }
+
+    if (page === "incident-report") {
+        bindIncidentForm();
+        bindIncidentEditForm();
+        bindIncidentFilters();
+        await renderIncidentTable();
+        return;
+    }
+
+    if (page === "dashboard") {
+        await renderDashboard();
+        return;
+    }
+
+    if (page === "reports") {
+        const range = defaultAuditRange();
+        const startField = document.getElementById("reportStartDate");
+        const endField = document.getElementById("reportEndDate");
+
+        if (startField) startField.value = range.startDate;
+        if (endField) endField.value = range.endDate;
+
+        bindReports();
+        await renderReportsTable([], document.getElementById("reportType")?.value || "access");
+        return;
+    }
+
+    if (page === "audit-history") {
+        const range = defaultAuditRange();
+        const startField = document.getElementById("auditStartDate");
+        const endField = document.getElementById("auditEndDate");
+
+        if (startField) startField.value = range.startDate;
+        if (endField) endField.value = range.endDate;
+
+        bindAuditHistory();
+
         try {
-            setSession(await api("/api/session"));
+            const rows = await loadAuditReport(range.startDate, range.endDate);
+            await renderAuditTable(rows);
         } catch (error) {
-            clearSession();
-            if (!/Login required/i.test(error.message)) {
-                throw error;
-            }
+            message("auditMessage", error.message || "Failed to load audit history.", true);
         }
-
-        if (!protectRoute(page)) {
-            return;
-        }
-
-        applyRolePermissions();
-        await initializePage(page);
-    } catch (error) {
-        const targetId = page === "login" ? "loginMessage" : page === "visitor-registration" ? "visitorMessage" : page === "access-control" ? "accessMessage" : page === "incident-report" ? "incidentMessage" : page === "users" ? "userMessage" : page === "employees" ? "employeeMessage" : page === "reports" ? "reportMessage" : page === "audit-history" ? "auditMessage" : null;
-        if (targetId) {
-            message(targetId, error.message || "Failed to load data.", true);
-        }
-        console.error(error);
     }
 });
