@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV Monitoring - Union Group Security</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="cctv">
+    <nav>
+        <h2>Union <span class="brand-accent">Security</span></h2>
+        <div class="nav-links">
+            <a href="dashboard.html">Dashboard</a>
+            <a href="users.html">User Management</a>
+            <a href="employees.html">Employee Management</a>
+            <a href="subsidiaries.html">Subsidiaries</a>
+            <a href="cctv-monitoring.html" class="is-active">CCTV Monitoring</a>
+            <a href="reports.html">Reports</a>
+            <a href="audit-history.html">Audit History</a>
+            <a href="visitor-registration.html">Register Visitor</a>
+            <a href="access-control.html">Access Control</a>
+            <a href="incident-report.html">Report Incident</a>
+            <a href="notifications.html">Notifications</a>
+            <a href="login.html" class="btn btn-danger btn-nav" data-logout>Logout</a>
+        </div>
+    </nav>
+    <div class="container animate-fade page-shell">
+        <h1>CCTV Monitoring</h1>
+        <div class="glass-panel">
+            <h3>Add CCTV Device</h3>
+            <form id="cctvForm">
+                <input type="hidden" id="cctvId">
+                <input type="text" id="cameraName" placeholder="Camera name" required>
+                <input type="text" id="location" placeholder="Location" required>
+                <select id="status"><option>Online</option><option>Offline</option><option>Maintenance</option></select>
+                <select id="subsidiaryId"><option value="">No subsidiary</option></select>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </form>
+            <p id="cctvMessage"></p>
+        </div>
+        <div class="glass-panel">
+            <table>
+                <thead><tr><th>Camera</th><th>Location</th><th>Status</th><th>Subsidiary</th><th>Actions</th></tr></thead>
+                <tbody id="cctvTable"></tbody>
+            </table>
+        </div>
+        <div class="glass-panel">
+            <h3>Alarm Events</h3>
+            <form id="alarmForm">
+                <input type="text" id="alarmType" placeholder="Alarm type" required>
+                <select id="alarmCctv"></select>
+                <button type="submit" class="btn btn-primary">Create Alarm</button>
+            </form>
+            <table>
+                <thead><tr><th>Type</th><th>Status</th><th>Date/Time</th><th>Camera</th><th>Action</th></tr></thead>
+                <tbody id="alarmTable"></tbody>
+            </table>
+        </div>
+    </div>
+    <script src="js/app.js"></script>
+    <script>
+        async function loadSubsidiaries() {
+            const rows = await api("/api/subsidiaries");
+            const sel = document.getElementById("subsidiaryId");
+            sel.innerHTML = '<option value="">No subsidiary</option>' + rows.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("");
+        }
+        async function loadCctvSelects() {
+            const rows = await api("/api/cctv");
+            const sel = document.getElementById("alarmCctv");
+            sel.innerHTML = rows.map(r => `<option value="${r.id}">${escapeHtml(r.cameraName)}</option>`).join("");
+        }
+        async function renderCctv() {
+            const rows = await api("/api/cctv");
+            const tbody = document.getElementById("cctvTable");
+            tbody.innerHTML = rows.map(r => `<tr>
+                <td>${escapeHtml(r.cameraName)}</td>
+                <td>${escapeHtml(r.location)}</td>
+                <td>${escapeHtml(r.status)}</td>
+                <td>${escapeHtml(r.subsidiaryName)}</td>
+                <td><button onclick="deleteCctv(${r.id})">Delete</button></td>
+            </tr>`).join("") || tableEmptyRow(5, "No CCTV devices found.");
+        }
+        async function renderAlarms() {
+            const rows = await api("/api/alarms");
+            const tbody = document.getElementById("alarmTable");
+            tbody.innerHTML = rows.map(r => `<tr>
+                <td>${escapeHtml(r.alarmType)}</td>
+                <td>${escapeHtml(r.status)}</td>
+                <td>${escapeHtml(r.dateTime)}</td>
+                <td>${escapeHtml(r.cameraName)}</td>
+                <td><button onclick="resolveAlarm(${r.id})">Resolve</button></td>
+            </tr>`).join("") || tableEmptyRow(5, "No alarms found.");
+        }
+        async function deleteCctv(id) {
+            await api("/api/cctv/delete", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"}, body: formBody({ cctvId: id }) });
+            await Promise.all([renderCctv(), loadCctvSelects()]);
+        }
+        async function resolveAlarm(id) {
+            await api("/api/alarms/update", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"}, body: formBody({ alarmId: id, status: "Resolved" }) });
+            await renderAlarms();
+        }
+        document.getElementById("cctvForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const cameraName = document.getElementById("cameraName").value;
+            const location = document.getElementById("location").value;
+            const status = document.getElementById("status").value;
+            const subsidiaryId = document.getElementById("subsidiaryId").value;
+            await api("/api/cctv", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"}, body: formBody({ cameraName, location, status, subsidiaryId }) });
+            e.target.reset();
+            await Promise.all([renderCctv(), loadCctvSelects()]);
+        });
+        document.getElementById("alarmForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const alarmType = document.getElementById("alarmType").value;
+            const cctvId = document.getElementById("alarmCctv").value;
+            await api("/api/alarms", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"}, body: formBody({ alarmType, cctvId, status: "New" }) });
+            e.target.reset();
+            await renderAlarms();
+        });
+        Promise.all([loadSubsidiaries(), loadCctvSelects(), renderCctv(), renderAlarms()]);
+    </script>
+</body>
+</html>

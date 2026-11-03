@@ -13,8 +13,18 @@ $OutDir = Join-Path $RootDir "target\classes"
 # Main Java class to run (entry point of your application)
 $MainClass = "com.uniongroup.sms.SmsApplication"
 
-# Default path to MySQL JDBC driver (used to connect Java to MySQL)
-$DefaultJar = "C:\Users\waith\Downloads\mysql-connector-j-9.6.0\mysql-connector-j-9.6.0.jar"
+# Resolve Java tools from JAVA_HOME first, then PATH.
+$JavaBin = if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) { Join-Path $env:JAVA_HOME "bin" } else { $null }
+$Javac = if ($JavaBin -and (Test-Path (Join-Path $JavaBin "javac.exe"))) { Join-Path $JavaBin "javac.exe" } else { (Get-Command javac -ErrorAction SilentlyContinue).Source }
+$Java = if ($JavaBin -and (Test-Path (Join-Path $JavaBin "java.exe"))) { Join-Path $JavaBin "java.exe" } else { (Get-Command java -ErrorAction SilentlyContinue).Source }
+if (-not $Javac -or -not $Java) {
+    throw "A JDK is required but javac/java were not found. Install a JDK and set JAVA_HOME to its folder (for example, C:\Program Files\Microsoft\jdk-21...)."
+}
+
+# Prefer a JDBC driver bundled with this project. This keeps the setup portable
+# across machines and avoids relying on a user's Downloads directory.
+$BundledJars = @(Get-ChildItem -LiteralPath (Join-Path $RootDir "lib") -Filter "mysql-connector-j*.jar" -File -Recurse -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending)
 
 
 # Function to load environment variables from a .env file
@@ -74,9 +84,11 @@ Import-DotEnv (Join-Path $RootDir ".env")
 # Get JDBC JAR path from environment variable (if set)
 $JdbcJar = [System.Environment]::GetEnvironmentVariable("JDBC_JAR")
 
-# If not set, use default path
+# If not set, use the first bundled Connector/J jar.
 if ([string]::IsNullOrWhiteSpace($JdbcJar)) {
-    $JdbcJar = $DefaultJar
+    if ($BundledJars.Count -gt 0) {
+        $JdbcJar = $BundledJars[0].FullName
+    }
 }
 
 
@@ -97,7 +109,8 @@ if ([string]::IsNullOrWhiteSpace($PortValue)) {
 
 # Check if MySQL JDBC driver file exists
 if (-not (Test-Path -LiteralPath $JdbcJar)) {
-    throw "MySQL JDBC jar not found at: $JdbcJar`nSet JDBC_JAR in .env to the extracted mysql-connector-j .jar path."
+    $bundledHint = if ($BundledJars.Count -gt 0) { $BundledJars[0].FullName } else { "No mysql-connector-j*.jar found under $(Join-Path $RootDir 'lib')." }
+    throw "MySQL JDBC jar not found at: $JdbcJar`nSet JDBC_JAR in .env to a valid jar path, or place the driver under the project's lib folder. $bundledHint"
 }
 
 
@@ -132,7 +145,7 @@ $JavaSources = Get-ChildItem -Path (Join-Path $RootDir "src\main\java\com\uniong
 # Compile Java files using javac
 # -cp → classpath (includes MySQL driver)
 # -d → output directory
-& javac -cp $JdbcJar -d $OutDir $JavaSources
+& $Javac -cp $JdbcJar -d $OutDir $JavaSources
 
 # If compilation fails, exit with error code
 if ($LASTEXITCODE -ne 0) {
@@ -144,7 +157,7 @@ if ($LASTEXITCODE -ne 0) {
 $ClassPath = "$OutDir;$JdbcJar"
 
 # Run the Java application
-& java -cp $ClassPath $MainClass $PortValue
+& $Java -cp $ClassPath $MainClass $PortValue
 
 # Exit with the same status as Java program
 exit $LASTEXITCODE

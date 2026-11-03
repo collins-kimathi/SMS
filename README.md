@@ -1,219 +1,93 @@
 # Security Management System
 
-A plain Java + MySQL web application for managing:
-
-- user accounts
-- employees
-- visitors
-- access logs
-- incident reports
-- audit history
-- operational reports
-
-This project does not use Maven, Gradle, Spring Boot, or a frontend framework. It runs as a lightweight Java HTTP server with static HTML, CSS, and JavaScript.
+A plain Java and MySQL web application for managing security operations. The server uses Java's built-in HTTP server; the interface is static HTML, CSS, and JavaScript. There is no Maven or Gradle build.
 
 ## Features
 
-- login with PBKDF2-hashed passwords
-- database-backed server sessions
-- role-based access control for `Admin` and `Security Officer`
-- visitor registration with duplicate ID protection
-- employee management
-- access entry, exit, edit, and delete workflows
-- incident creation, editing, and filtering
-- user management
-- reports for:
-  - access logs
-  - incidents
-  - visitors
-  - audit trail
-- CSV export for reports
-- audit logging for important system actions
-
-## Tech stack
-
-- Java
-- MySQL
-- JDBC
-- HTML
-- CSS
-- Vanilla JavaScript
-
-## Default accounts
-
-The schema seeds these starter accounts:
-
-- `admin / Admin@Union2026!`
-- `officer / Officer@Union2026!`
-
-Change them immediately after first login in any real deployment.
-
-## Project structure
-
-- `src/main/java/com/uniongroup/sms/SmsApplication.java`
-- `src/main/resources/static/`
-- `database/schema.sql`
+- User accounts, roles, and database-backed sessions
+- Employee, visitor, and access log management
+- Incident reporting and audit history
+- CCTV, alarms, notifications, subsidiaries, and operational reports
+- CSV report export
 
 ## Requirements
 
-Before running the project, make sure you have:
+- JDK 21 or newer (`java` and `javac`)
+- MySQL 8 or newer, running locally or reachable over the network
+- MySQL Connector/J jar
+- PowerShell 7 or Windows PowerShell 5.1 to use the included Windows scripts
 
-- Java installed
-- MySQL installed and running
-- MySQL Connector/J JDBC jar available on your machine
+## Run on Windows
 
-## Setup
+Open PowerShell in the project directory. Install a JDK if needed:
 
-### 1. Clone the repository
-
-```bash
-git clone <your-repo-url>
-cd <your-repo-folder>
+```powershell
+winget install Microsoft.OpenJDK.21
 ```
 
-### 2. Create and seed the database
+Open a new PowerShell window and confirm Java is available:
 
-```bash
-mysql -u root -p < database/schema.sql
+```powershell
+java -version
+javac -version
 ```
 
-The application now requires database environment variables and will not start without them:
+Create and seed the database (enter your MySQL root password when prompted):
 
-```bash
-export SMS_DB_URL='jdbc:mysql://your-db-host:3306/sms_db?serverTimezone=UTC'
-export SMS_DB_USER='your_db_user'
-export SMS_DB_PASSWORD='replace_with_a_strong_password'
-export PORT='9090'
-export JDBC_JAR='/path/to/mysql-connector-j.jar'
+```powershell
+Get-Content .\database\schema.sql | mysql -u root -p
 ```
 
-Or create a local `.env` file from the example:
+Create local configuration and edit it with the credentials for a MySQL user that can access `sms_db`:
 
-```bash
-cp .env.example .env
+```powershell
+Copy-Item .env.example .env
+notepad .env
 ```
 
-Then edit `.env` with your real values. The deploy script will load it automatically.
+Place a `mysql-connector-j*.jar` file somewhere under `lib\`. The deploy script discovers it automatically. If you keep the jar elsewhere, set `JDBC_JAR` in `.env` to its full path.
 
-### 3. Find your MySQL JDBC jar
+Start the server:
 
-You need the path to the MySQL Connector/J jar.
-
-Examples:
-
-- Linux:
-  - `/usr/share/java/mysql-connector-j-9.6.0.jar`
-- macOS or custom install:
-  - wherever you placed `mysql-connector-j-*.jar`
-
-### 4. Compile
-
-Replace `/path/to/mysql-connector-j.jar` with your actual jar path:
-
-```bash
-mkdir -p target/classes
-javac -cp /path/to/mysql-connector-j.jar -d target/classes src/main/java/com/uniongroup/sms/*.java
+```powershell
+.\setup_sms.ps1
 ```
 
-### 5. Run
+The script compiles the Java source and starts the server on port 9090 by default. Open <http://localhost:9090>. To use another port, set `PORT` in `.env`.
 
-```bash
-java -cp target/classes:/path/to/mysql-connector-j.jar com.uniongroup.sms.SmsApplication 9090
+You can run `script\deploy.ps1` directly after creating `.env` and placing the JDBC jar.
+
+## Run manually
+
+From the project root, configure `SMS_DB_URL`, `SMS_DB_USER`, and `SMS_DB_PASSWORD` in the environment, then compile and run (replace the jar path if needed):
+
+```powershell
+$jdbc = (Get-ChildItem .\lib -Filter 'mysql-connector-j*.jar' -Recurse | Select-Object -First 1).FullName
+New-Item -ItemType Directory -Force .\target\classes | Out-Null
+$sources = Get-ChildItem .\src\main\java -Filter '*.java' -Recurse | ForEach-Object FullName
+javac -cp $jdbc -d .\target\classes $sources
+java -cp ".\target\classes;$jdbc" com.uniongroup.sms.SmsApplication 9090
 ```
 
-Then open:
+## Starter accounts
 
-```text
-http://localhost:9090
-```
+The schema seeds these accounts for local development:
 
-### 6. Simple deploy script
+| Role | Username | Password |
+|---|---|---|
+| Administrator | `admin` | `Admin@Union2026!` |
+| Security officer | `officer` | `Officer@Union2026!` |
+| Management | `manager` | `Officer@Union2026!` |
 
-You can also run the app with the included script after setting the required environment variables:
+Change these passwords before using the system outside a local development environment.
 
-```bash
-chmod +x scripts/deploy.sh
-./scripts/deploy.sh
-```
+## Configuration and repository hygiene
 
-The script:
-- checks required environment variables
-- checks that the JDBC jar exists
-- compiles the app
-- starts the server
+- Copy `.env.example` to `.env` and keep real credentials in `.env` only. `.env` is ignored by Git.
+- Never commit database passwords, production data, or private keys.
+- Build output is written to `target/`, which is also ignored by Git.
+- The schema is in `database/schema.sql`; static pages are in `src/main/resources/static/`.
 
-For local development, the frontend is served directly from `src/main/resources/static`, so no `out/` folder is required.
+## License
 
-## Role access
-
-### Admin
-
-- dashboard
-- user management
-- employee management
-- reports
-- audit history
-
-### Security Officer
-
-- dashboard
-- visitor registration
-- access control
-- incident reporting
-
-## Main pages
-
-- `login.html`
-- `dashboard.html`
-- `visitor-registration.html`
-- `access-control.html`
-- `incident-report.html`
-- `users.html`
-- `employees.html`
-- `reports.html`
-- `audit-history.html`
-
-## Quick test flow
-
-1. Log in as `admin`.
-2. Change the seeded account passwords.
-3. Open `User Management` and create or edit a user.
-4. Open `Employee Management` and add an employee.
-5. Open `Reports` and generate a report.
-6. Open `Audit History` and confirm actions are recorded.
-7. Log out.
-8. Log in as `officer`.
-9. Register a visitor.
-10. Record visitor entry and exit.
-11. Create and edit an incident.
-
-## Helpful database checks
-
-You can inspect the tables directly in MySQL:
-
-```sql
-USE sms_db;
-SHOW TABLES;
-SELECT * FROM users;
-SELECT * FROM visitors;
-SELECT * FROM employees;
-SELECT * FROM access_logs;
-SELECT * FROM incidents;
-SELECT * FROM sessions;
-SELECT * FROM audit_logs;
-```
-
-## Notes
-
-- Sessions are stored in MySQL.
-- Reports can be exported as CSV.
-- Passwords are stored hashed, not in plain text.
-- Database credentials are read from environment variables only.
-- Java classes are compiled into `target/classes`.
-- Frontend source files are served directly from `src/main/resources/static` during local runs.
-
-## Additional guide
-
-If you want a more detailed local run guide, see:
-
-- `README-plain-java.md`
+No license is currently specified. Add a `LICENSE` file before publishing this repository if you want others to have explicit permission to use, modify, or distribute the code.

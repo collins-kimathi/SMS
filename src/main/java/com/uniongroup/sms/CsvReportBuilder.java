@@ -138,6 +138,34 @@ final class CsvReportBuilder {
                 }
             }
 
+        } else if ("alarms".equals(type)) {
+
+            rows.add(new String[] {"Date/Time", "Type", "Status", "Camera"});
+
+            String sql = ""
+                + "SELECT a.date_time, a.alarm_type, a.status, c.camera_name "
+                + "FROM alarm_events a JOIN cctv_devices c ON a.cctv_id = c.cctv_id "
+                + "WHERE DATE(a.date_time) BETWEEN ? AND ? "
+                + "ORDER BY a.date_time DESC";
+
+            try (Connection connection = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+                 PreparedStatement ps = connection.prepareStatement(sql)) {
+
+                ps.setDate(1, java.sql.Date.valueOf(startDate));
+                ps.setDate(2, java.sql.Date.valueOf(endDate));
+
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        rows.add(new String[] {
+                            String.valueOf(rs.getTimestamp("date_time")),
+                            rs.getString("alarm_type"),
+                            rs.getString("status"),
+                            rs.getString("camera_name")
+                        });
+                    }
+                }
+            }
+
         } else {
             throw new IllegalArgumentException("Unsupported report type");
         }

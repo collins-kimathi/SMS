@@ -84,6 +84,9 @@ public class SmsApplication {
 
     // API router: map each /api path to a dedicated handler method below.
     private static void handleApiRequest(HttpExchange exchange, String path) throws IOException {
+        String clientIp = exchange.getRemoteAddress() == null || exchange.getRemoteAddress().getAddress() == null
+            ? null : exchange.getRemoteAddress().getAddress().getHostAddress();
+        SmsApplication.setCurrentRequestIp(clientIp);
         try {
             switch (path) {
                 case "/api/login":
@@ -164,6 +167,65 @@ public class SmsApplication {
                     requireMethod(exchange, "POST");
                     IncidentController.handleUpdate(exchange);
                     break;
+                case "/api/subsidiaries":
+                    if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        SubsidiaryController.handleList(exchange);
+                    } else if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        SubsidiaryController.handleCreate(exchange);
+                    } else {
+                        sendMethodNotAllowed(exchange);
+                    }
+                    break;
+                case "/api/subsidiaries/update":
+                    requireMethod(exchange, "POST");
+                    SubsidiaryController.handleUpdate(exchange);
+                    break;
+                case "/api/subsidiaries/delete":
+                    requireMethod(exchange, "POST");
+                    SubsidiaryController.handleDelete(exchange);
+                    break;
+                case "/api/cctv":
+                    if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        CctvController.handleList(exchange);
+                    } else if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        CctvController.handleCreate(exchange);
+                    } else {
+                        sendMethodNotAllowed(exchange);
+                    }
+                    break;
+                case "/api/cctv/update":
+                    requireMethod(exchange, "POST");
+                    CctvController.handleUpdate(exchange);
+                    break;
+                case "/api/cctv/delete":
+                    requireMethod(exchange, "POST");
+                    CctvController.handleDelete(exchange);
+                    break;
+                case "/api/alarms":
+                    if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        AlarmController.handleList(exchange);
+                    } else if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        AlarmController.handleCreate(exchange);
+                    } else {
+                        sendMethodNotAllowed(exchange);
+                    }
+                    break;
+                case "/api/alarms/update":
+                    requireMethod(exchange, "POST");
+                    AlarmController.handleUpdate(exchange);
+                    break;
+                case "/api/alarms/delete":
+                    requireMethod(exchange, "POST");
+                    AlarmController.handleDelete(exchange);
+                    break;
+                case "/api/notifications":
+                    requireMethod(exchange, "GET");
+                    NotificationController.handleList(exchange);
+                    break;
+                case "/api/notifications/read":
+                    requireMethod(exchange, "POST");
+                    NotificationController.handleMarkRead(exchange);
+                    break;
                 case "/api/users":
                     if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
                         UserController.handleList(exchange);
@@ -197,6 +259,10 @@ public class SmsApplication {
                     requireMethod(exchange, "GET");
                     ReportController.handleAuditReport(exchange);
                     break;
+                case "/api/reports/alarms":
+                    requireMethod(exchange, "GET");
+                    ReportController.handleAlarmReport(exchange);
+                    break;
                 case "/api/reports/export":
                     requireMethod(exchange, "GET");
                     ReportController.handleExport(exchange);
@@ -219,6 +285,8 @@ public class SmsApplication {
         } catch (Exception exception) {
             exception.printStackTrace();
             sendJson(exchange, 500, "{\"message\":\"Server error\",\"detail\":\"" + escapeJson(exception.getMessage()) + "\"}");
+        } finally {
+            SmsApplication.clearCurrentRequestIp();
         }
     }
 
@@ -259,7 +327,7 @@ public class SmsApplication {
     }
 
     static void recordAuditAction(Connection connection, Integer userId, String actionType, String entityType, String entityId, String details) throws SQLException {
-        String sql = "INSERT INTO audit_logs (user_id, username, action_type, entity_type, entity_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO audit_logs (user_id, username, action_type, entity_type, entity_id, details, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             if (userId == null) {
                 statement.setNull(1, java.sql.Types.INTEGER);
@@ -272,9 +340,24 @@ public class SmsApplication {
             statement.setString(4, entityType);
             statement.setString(5, entityId);
             statement.setString(6, details);
-            statement.setTimestamp(7, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
+            statement.setString(7, currentRequestIp());
+            statement.setTimestamp(8, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
             statement.executeUpdate();
         }
+    }
+
+    private static final ThreadLocal<String> REQUEST_IP = new ThreadLocal<>();
+
+    static void setCurrentRequestIp(String ip) {
+        REQUEST_IP.set(ip);
+    }
+
+    static void clearCurrentRequestIp() {
+        REQUEST_IP.remove();
+    }
+
+    static String currentRequestIp() {
+        return REQUEST_IP.get();
     }
 
     static String resolveUsername(Connection connection, int userId) throws SQLException {
@@ -304,6 +387,18 @@ public class SmsApplication {
         }
     }
 
+    static void requireManagement(SessionInfo session) {
+        if (!isAdminRole(session.role) && !isManagementRole(session.role)) {
+            throw new SecurityException("Only management or admin users can perform this action");
+        }
+    }
+
+    static void requireAdminOrManagement(SessionInfo session) {
+        if (!isAdminRole(session.role) && !isManagementRole(session.role)) {
+            throw new SecurityException("Only admin or management users can perform this action");
+        }
+    }
+
     static boolean isSecurityRole(String role) {
         String normalizedRole = defaultString(role, "").toLowerCase().replace(" ", "");
         return "security".equals(normalizedRole) || "securityofficer".equals(normalizedRole);
@@ -311,6 +406,11 @@ public class SmsApplication {
 
     static boolean isAdminRole(String role) {
         return "admin".equals(defaultString(role, "").toLowerCase().replace(" ", ""));
+    }
+
+    static boolean isManagementRole(String role) {
+        String normalizedRole = defaultString(role, "").toLowerCase().replace(" ", "");
+        return "management".equals(normalizedRole) || "manager".equals(normalizedRole);
     }
 
     static boolean usernameExists(Connection connection, String username, Integer excludedUserId) throws SQLException {

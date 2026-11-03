@@ -14,7 +14,8 @@ final class EmployeeController {
     static void handleList(HttpExchange exchange) throws IOException, SQLException {
         SmsApplication.requireAuthenticated(exchange);
 
-        String sql = "SELECT employee_id, name, department, phone_number FROM employees ORDER BY name ASC";
+        String sql = "SELECT e.employee_id, e.name, e.department, e.position, e.phone_number, e.email, e.subsidiary_id, s.subsidiary_name " +
+            "FROM employees e LEFT JOIN subsidiaries s ON e.subsidiary_id = s.subsidiary_id ORDER BY e.name ASC";
         List<String> rows = new ArrayList<>();
 
         try (Connection connection = SmsApplication.getConnection();
@@ -26,7 +27,11 @@ final class EmployeeController {
                     + "\"id\":" + rs.getInt("employee_id") + ","
                     + "\"name\":\"" + SmsApplication.escapeJson(rs.getString("name")) + "\","
                     + "\"department\":\"" + SmsApplication.escapeJson(rs.getString("department")) + "\","
-                    + "\"phoneNumber\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("phone_number"), "")) + "\""
+                    + "\"position\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("position"), "")) + "\","
+                    + "\"phoneNumber\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("phone_number"), "")) + "\","
+                    + "\"email\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("email"), "")) + "\","
+                    + "\"subsidiaryId\":" + rs.getInt("subsidiary_id") + ","
+                    + "\"subsidiaryName\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("subsidiary_name"), "")) + "\""
                     + "}");
             }
         }
@@ -44,13 +49,16 @@ final class EmployeeController {
         String name = SmsApplication.trim(form.get("name"));
         String department = SmsApplication.trim(form.get("department"));
         String phone = SmsApplication.trim(form.get("phoneNumber"));
+        String position = SmsApplication.trim(form.get("position"));
+        String email = SmsApplication.trim(form.get("email"));
+        String subsidiaryId = SmsApplication.trim(form.get("subsidiaryId"));
 
         if (name.isEmpty() || department.isEmpty()) {
             SmsApplication.sendJson(exchange, 400, "{\"message\":\"Employee name and department are required\"}");
             return;
         }
 
-        String sql = "INSERT INTO employees (name, department, phone_number) VALUES (?, ?, ?)";
+        String sql = "INSERT INTO employees (name, department, phone_number, position, email, subsidiary_id) VALUES (?, ?, ?, ?, ?, ?)";
 
         try (Connection connection = SmsApplication.getConnection();
              PreparedStatement ps = connection.prepareStatement(sql)) {
@@ -58,6 +66,9 @@ final class EmployeeController {
             ps.setString(1, name);
             ps.setString(2, department);
             ps.setString(3, phone);
+            ps.setString(4, position);
+            ps.setString(5, email);
+            if (subsidiaryId.isEmpty()) ps.setNull(6, java.sql.Types.INTEGER); else ps.setInt(6, Integer.parseInt(subsidiaryId));
             ps.executeUpdate();
 
             SmsApplication.recordAuditAction(connection, session.userId, "CREATE", "employee", name, "Created employee " + name);
@@ -77,13 +88,16 @@ final class EmployeeController {
         String name = SmsApplication.trim(form.get("name"));
         String department = SmsApplication.trim(form.get("department"));
         String phone = SmsApplication.trim(form.get("phoneNumber"));
+        String position = SmsApplication.trim(form.get("position"));
+        String email = SmsApplication.trim(form.get("email"));
+        String subsidiaryId = SmsApplication.trim(form.get("subsidiaryId"));
 
         if (name.isEmpty() || department.isEmpty()) {
             SmsApplication.sendJson(exchange, 400, "{\"message\":\"Employee name and department are required\"}");
             return;
         }
 
-        String sql = "UPDATE employees SET name = ?, department = ?, phone_number = ? WHERE employee_id = ?";
+        String sql = "UPDATE employees SET name = ?, department = ?, phone_number = ?, position = ?, email = ?, subsidiary_id = ? WHERE employee_id = ?";
 
         try (Connection connection = SmsApplication.getConnection();
              PreparedStatement ps = connection.prepareStatement(sql)) {
@@ -91,7 +105,10 @@ final class EmployeeController {
             ps.setString(1, name);
             ps.setString(2, department);
             ps.setString(3, phone);
-            ps.setInt(4, employeeId);
+            ps.setString(4, position);
+            ps.setString(5, email);
+            if (subsidiaryId.isEmpty()) ps.setNull(6, java.sql.Types.INTEGER); else ps.setInt(6, Integer.parseInt(subsidiaryId));
+            ps.setInt(7, employeeId);
 
             if (ps.executeUpdate() == 0) {
                 SmsApplication.sendJson(exchange, 404, "{\"message\":\"Employee not found\"}");

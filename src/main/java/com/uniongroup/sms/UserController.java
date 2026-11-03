@@ -14,7 +14,7 @@ final class UserController {
     static void handleList(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
 
-        String sql = "SELECT user_id, username, role FROM users ORDER BY user_id ASC";
+        String sql = "SELECT user_id, username, full_name, email, phone_number, role, mfa_status, account_status FROM users ORDER BY user_id ASC";
         List<String> rows = new ArrayList<>();
 
         try (Connection connection = SmsApplication.getConnection();
@@ -27,7 +27,12 @@ final class UserController {
                     rows.add("{"
                         + "\"userId\":" + rs.getInt("user_id") + ","
                         + "\"username\":\"" + SmsApplication.escapeJson(rs.getString("username")) + "\","
-                        + "\"role\":\"" + SmsApplication.escapeJson(rs.getString("role")) + "\""
+                        + "\"fullName\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("full_name"), "")) + "\","
+                        + "\"email\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("email"), "")) + "\","
+                        + "\"phoneNumber\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("phone_number"), "")) + "\","
+                        + "\"role\":\"" + SmsApplication.escapeJson(rs.getString("role")) + "\","
+                        + "\"mfaStatus\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("mfa_status"), "Disabled")) + "\","
+                        + "\"accountStatus\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("account_status"), "Active")) + "\""
                         + "}");
                 }
             }
@@ -44,6 +49,9 @@ final class UserController {
         String username = SmsApplication.trim(form.get("username"));
         String password = SmsApplication.trim(form.get("password"));
         String role = SmsApplication.trim(form.get("role"));
+        String fullName = SmsApplication.trim(form.get("fullName"));
+        String email = SmsApplication.trim(form.get("email"));
+        String phone = SmsApplication.trim(form.get("phoneNumber"));
 
         if (username.isEmpty() || password.isEmpty() || role.isEmpty()) {
             SmsApplication.sendJson(exchange, 400, "{\"message\":\"All user fields are required\"}");
@@ -58,11 +66,14 @@ final class UserController {
                 return;
             }
 
-            String sql = "INSERT INTO users (username, password, role) VALUES (?, ?, ?)";
+            String sql = "INSERT INTO users (username, password, role, full_name, email, phone_number, account_status) VALUES (?, ?, ?, ?, ?, ?, 'Active')";
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 ps.setString(1, username);
                 ps.setString(2, PasswordUtils.hashPassword(password));
                 ps.setString(3, role);
+                ps.setString(4, fullName);
+                ps.setString(5, email);
+                ps.setString(6, phone);
                 ps.executeUpdate();
             }
 
@@ -81,6 +92,11 @@ final class UserController {
         String username = SmsApplication.trim(form.get("username"));
         String password = SmsApplication.trim(form.get("password"));
         String role = SmsApplication.trim(form.get("role"));
+        String fullName = SmsApplication.trim(form.get("fullName"));
+        String email = SmsApplication.trim(form.get("email"));
+        String phone = SmsApplication.trim(form.get("phoneNumber"));
+        String accountStatus = SmsApplication.trim(form.get("accountStatus"));
+        if (accountStatus.isEmpty()) accountStatus = "Active";
 
         if (username.isEmpty() || role.isEmpty()) {
             SmsApplication.sendJson(exchange, 400, "{\"message\":\"Username and role are required\"}");
@@ -115,19 +131,27 @@ final class UserController {
 
             // Switch query depending on password change
             String sql = password.isEmpty()
-                ? "UPDATE users SET username = ?, role = ? WHERE user_id = ?"
-                : "UPDATE users SET username = ?, password = ?, role = ? WHERE user_id = ?";
+                ? "UPDATE users SET username = ?, role = ?, full_name = ?, email = ?, phone_number = ?, account_status = ? WHERE user_id = ?"
+                : "UPDATE users SET username = ?, password = ?, role = ?, full_name = ?, email = ?, phone_number = ?, account_status = ? WHERE user_id = ?";
 
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 ps.setString(1, username);
 
                 if (password.isEmpty()) {
                     ps.setString(2, role);
-                    ps.setInt(3, targetUserId);
+                    ps.setString(3, fullName);
+                    ps.setString(4, email);
+                    ps.setString(5, phone);
+                    ps.setString(6, accountStatus);
+                    ps.setInt(7, targetUserId);
                 } else {
                     ps.setString(2, PasswordUtils.hashPassword(password));
                     ps.setString(3, role);
-                    ps.setInt(4, targetUserId);
+                    ps.setString(4, fullName);
+                    ps.setString(5, email);
+                    ps.setString(6, phone);
+                    ps.setString(7, accountStatus);
+                    ps.setInt(8, targetUserId);
                 }
 
                 if (ps.executeUpdate() == 0) {

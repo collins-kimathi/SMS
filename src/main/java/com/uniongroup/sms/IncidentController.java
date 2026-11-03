@@ -16,9 +16,12 @@ final class IncidentController {
 
         String sql = ""
             + "SELECT i.incident_id, i.title, i.incident_type, i.location, i.status, i.action_taken, "
-            + "i.description, i.severity, i.reported_at, u.user_id, u.username "
+            + "i.description, i.severity, i.reported_at, i.assigned_officer, i.subsidiary_id, "
+            + "u.user_id, u.username, ao.username AS assigned_username, s.subsidiary_name "
             + "FROM incidents i "
             + "JOIN users u ON i.user_id = u.user_id "
+            + "LEFT JOIN users ao ON i.assigned_officer = ao.user_id "
+            + "LEFT JOIN subsidiaries s ON i.subsidiary_id = s.subsidiary_id "
             + "ORDER BY i.incident_id DESC";
 
         List<String> rows = new ArrayList<>();
@@ -39,7 +42,11 @@ final class IncidentController {
                     + "\"severity\":\"" + SmsApplication.escapeJson(rs.getString("severity")) + "\","
                     + "\"date\":\"" + rs.getTimestamp("reported_at").toLocalDateTime().toLocalDate() + "\","
                     + "\"reportedBy\":\"" + SmsApplication.escapeJson(rs.getString("username")) + "\","
-                    + "\"userId\":" + rs.getInt("user_id")
+                    + "\"userId\":" + rs.getInt("user_id") + ","
+                    + "\"assignedOfficer\":" + rs.getInt("assigned_officer") + ","
+                    + "\"assignedUsername\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("assigned_username"), "")) + "\","
+                    + "\"subsidiaryId\":" + rs.getInt("subsidiary_id") + ","
+                    + "\"subsidiaryName\":\"" + SmsApplication.escapeJson(SmsApplication.defaultString(rs.getString("subsidiary_name"), "")) + "\""
                     + "}");
             }
         }
@@ -59,6 +66,8 @@ final class IncidentController {
         String status = SmsApplication.trim(form.get("status"));
         String actionTaken = SmsApplication.trim(form.get("actionTaken"));
         String description = SmsApplication.trim(form.get("description"));
+        String assignedOfficer = SmsApplication.trim(form.get("assignedOfficer"));
+        String subsidiaryId = SmsApplication.trim(form.get("subsidiaryId"));
 
         if (title.isEmpty() || incidentType.isEmpty() || location.isEmpty()
             || severity.isEmpty() || status.isEmpty() || description.isEmpty()) {
@@ -67,7 +76,7 @@ final class IncidentController {
             return;
         }
 
-        String sql = "INSERT INTO incidents (title, incident_type, location, status, action_taken, description, severity, user_id, reported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO incidents (title, incident_type, location, status, action_taken, description, severity, user_id, assigned_officer, subsidiary_id, reported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection connection = SmsApplication.getConnection()) {
             SmsApplication.requireSecurityOfficer(session);
@@ -81,13 +90,16 @@ final class IncidentController {
                 ps.setString(6, description);
                 ps.setString(7, severity);
                 ps.setInt(8, session.userId);
-
-                // Normalize timestamp (drop nanos for consistency)
-                ps.setTimestamp(9, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
+                if (assignedOfficer.isEmpty()) ps.setNull(9, java.sql.Types.INTEGER); else ps.setInt(9, Integer.parseInt(assignedOfficer));
+                if (subsidiaryId.isEmpty()) ps.setNull(10, java.sql.Types.INTEGER); else ps.setInt(10, Integer.parseInt(subsidiaryId));
+                ps.setTimestamp(11, Timestamp.valueOf(java.time.LocalDateTime.now().withNano(0)));
                 ps.executeUpdate();
             }
 
             SmsApplication.recordAuditAction(connection, session.userId, "CREATE", "incident", title, "Created incident " + title);
+            if ("Critical".equalsIgnoreCase(severity) || "High".equalsIgnoreCase(severity)) {
+                AlarmController.createNotification(connection, "Critical incident: " + title, "A " + severity + " severity incident was reported at " + location, "Critical", null);
+            }
         }
 
         SmsApplication.sendJson(exchange, 201, "{\"message\":\"Incident report saved successfully\"}");
@@ -107,6 +119,8 @@ final class IncidentController {
         String status = SmsApplication.trim(form.get("status"));
         String actionTaken = SmsApplication.trim(form.get("actionTaken"));
         String description = SmsApplication.trim(form.get("description"));
+        String assignedOfficer = SmsApplication.trim(form.get("assignedOfficer"));
+        String subsidiaryId = SmsApplication.trim(form.get("subsidiaryId"));
 
         if (title.isEmpty() || incidentType.isEmpty() || location.isEmpty()
             || severity.isEmpty() || status.isEmpty() || description.isEmpty()) {
@@ -115,7 +129,7 @@ final class IncidentController {
             return;
         }
 
-        String sql = "UPDATE incidents SET title = ?, incident_type = ?, location = ?, status = ?, action_taken = ?, description = ?, severity = ? WHERE incident_id = ?";
+        String sql = "UPDATE incidents SET title = ?, incident_type = ?, location = ?, status = ?, action_taken = ?, description = ?, severity = ?, assigned_officer = ?, subsidiary_id = ? WHERE incident_id = ?";
 
         try (Connection connection = SmsApplication.getConnection()) {
             SmsApplication.requireIncidentManager(session);
@@ -128,7 +142,9 @@ final class IncidentController {
                 ps.setString(5, actionTaken);
                 ps.setString(6, description);
                 ps.setString(7, severity);
-                ps.setInt(8, incidentId);
+                if (assignedOfficer.isEmpty()) ps.setNull(8, java.sql.Types.INTEGER); else ps.setInt(8, Integer.parseInt(assignedOfficer));
+                if (subsidiaryId.isEmpty()) ps.setNull(9, java.sql.Types.INTEGER); else ps.setInt(9, Integer.parseInt(subsidiaryId));
+                ps.setInt(10, incidentId);
 
                 if (ps.executeUpdate() == 0) {
                     SmsApplication.sendJson(exchange, 404, "{\"message\":\"Incident not found\"}");

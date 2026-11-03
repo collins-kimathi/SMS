@@ -1,0 +1,1 @@
+The setup instructions are maintained in README.md. Follow the Windows setup section for JDK, MySQL, .env configuration, and launch commands.

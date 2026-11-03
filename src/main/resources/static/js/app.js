@@ -90,7 +90,8 @@ function reportEndpoint(type, startDate, endDate) {
         access: `/api/reports/access?${params}`,
         incidents: `/api/reports/incidents?${params}`,
         visitors: `/api/reports/visitors?${params}`,
-        audit: `/api/reports/audit?${params}`
+        audit: `/api/reports/audit?${params}`,
+        alarms: `/api/reports/alarms?${params}`
     };
     return map[type] || map.access;
 }
@@ -108,9 +109,10 @@ function canAccessPage(page, session) {
 
     const role = normalizedRole(session.role);
     const allowedPages = {
-        admin: new Set(["dashboard", "users", "employees", "reports", "audit-history"]),
-        security: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"]),
-        securityofficer: new Set(["dashboard", "visitor-registration", "access-control", "incident-report"])
+        admin: new Set(["dashboard", "users", "employees", "subsidiaries", "cctv", "reports", "audit-history", "notifications"]),
+        security: new Set(["dashboard", "visitor-registration", "access-control", "incident-report", "cctv", "notifications"]),
+        securityofficer: new Set(["dashboard", "visitor-registration", "access-control", "incident-report", "cctv", "notifications"]),
+        management: new Set(["dashboard", "reports", "audit-history", "notifications"])
     };
 
     return (allowedPages[role] || new Set(["dashboard"])).has(page);
@@ -141,7 +143,9 @@ function applyRolePermissions() {
     const role = normalizedRole(session.role);
     const restrictedPages = role === "admin"
         ? new Set(["visitor-registration.html", "access-control.html", "incident-report.html"])
-        : new Set(["users.html", "employees.html", "reports.html", "audit-history.html"]);
+        : role === "management"
+        ? new Set(["users.html", "employees.html", "subsidiaries.html", "cctv-monitoring.html", "visitor-registration.html", "access-control.html", "incident-report.html"])
+        : new Set(["users.html", "employees.html", "subsidiaries.html", "reports.html", "audit-history.html", "cctv-monitoring.html"]);
 
     document.querySelectorAll("a[href]").forEach((link) => {
         if (restrictedPages.has(link.getAttribute("href"))) {
@@ -346,7 +350,7 @@ function renderIncidentRows(incidents) {
     if (!target) return;
 
     if (!incidents.length) {
-        target.innerHTML = tableEmptyRow(10, "No incidents found.");
+        target.innerHTML = tableEmptyRow(12, "No incidents found.");
         bindIncidentRowActions(incidents);
         return;
     }
@@ -360,6 +364,8 @@ function renderIncidentRows(incidents) {
             <td>${escapeHtml(incident.severity)}</td>
             <td>${escapeHtml(incident.status)}</td>
             <td>${escapeHtml(incident.reportedBy)}</td>
+            <td>${escapeHtml(incident.assignedUsername || "-")}</td>
+            <td>${escapeHtml(incident.subsidiaryName || "-")}</td>
             <td>${escapeHtml(incident.actionTaken || "-")}</td>
             <td>${escapeHtml(incident.description)}</td>
             <td>
@@ -388,10 +394,12 @@ function filterIncidents() {
 // Render dashboard overview
 async function renderDashboard() {
     const session = getSession();
-    const [visitors, logs, incidents] = await Promise.all([
+    const [visitors, logs, incidents, alarms, cctv] = await Promise.all([
         loadVisitors(),
         loadAccessLogs(),
-        loadIncidents()
+        loadIncidents(),
+        api("/api/alarms"),
+        api("/api/cctv")
     ]);
 
     const activeVisitors = logs.filter((log) => !log.exitTime);
@@ -404,6 +412,8 @@ async function renderDashboard() {
     const visitorCount = document.getElementById("visitorCount");
     const openVisitsCount = document.getElementById("openVisitsCount");
     const incidentCount = document.getElementById("incidentCount");
+    const alarmCount = document.getElementById("alarmCount");
+    const cctvCount = document.getElementById("cctvCount");
     const incidentPreview = document.getElementById("incidentPreview");
 
     if (sessionUser) sessionUser.textContent = session?.username || "Operations Desk";
@@ -413,6 +423,8 @@ async function renderDashboard() {
     if (visitorCount) visitorCount.textContent = String(visitors.length);
     if (openVisitsCount) openVisitsCount.textContent = String(activeVisitors.length);
     if (incidentCount) incidentCount.textContent = String(incidents.length);
+    if (alarmCount) alarmCount.textContent = String(alarms.length);
+    if (cctvCount) cctvCount.textContent = String(cctv.length);
 
     if (incidentPreview) {
         if (!recentIncidents.length) {
@@ -440,7 +452,7 @@ async function renderUsersTable() {
     const users = await loadUsers();
 
     if (!users.length) {
-        target.innerHTML = tableEmptyRow(4, "No users found.");
+        target.innerHTML = tableEmptyRow(9, "No users found.");
         bindUserRowActions(users);
         return;
     }
@@ -448,8 +460,13 @@ async function renderUsersTable() {
     target.innerHTML = users.map((user) => `
         <tr>
             <td>${user.userId}</td>
-            <td>${user.username}</td>
-            <td>${user.role}</td>
+            <td>${escapeHtml(user.username)}</td>
+            <td>${escapeHtml(user.fullName)}</td>
+            <td>${escapeHtml(user.email)}</td>
+            <td>${escapeHtml(user.phoneNumber)}</td>
+            <td>${escapeHtml(user.role)}</td>
+            <td>${escapeHtml(user.mfaStatus)}</td>
+            <td>${escapeHtml(user.accountStatus)}</td>
             <td>
                 <button type="button" class="btn btn-secondary" data-edit-user="${user.userId}">Edit</button>
                 <button type="button" class="btn btn-danger" data-delete-user="${user.userId}">Delete</button>
@@ -467,7 +484,7 @@ async function renderEmployeesTable() {
 
     const employees = await loadEmployees();
     if (!employees.length) {
-        target.innerHTML = tableEmptyRow(5, "No employees found.");
+        target.innerHTML = tableEmptyRow(8, "No employees found.");
         bindEmployeeRowActions(employees);
         return;
     }
@@ -477,7 +494,10 @@ async function renderEmployeesTable() {
             <td>${employee.id}</td>
             <td>${escapeHtml(employee.name)}</td>
             <td>${escapeHtml(employee.department)}</td>
+            <td>${escapeHtml(employee.position || "-")}</td>
             <td>${escapeHtml(employee.phoneNumber || "-")}</td>
+            <td>${escapeHtml(employee.email || "-")}</td>
+            <td>${escapeHtml(employee.subsidiaryName || "-")}</td>
             <td>
                 <button type="button" class="btn btn-secondary" data-edit-employee="${employee.id}">Edit</button>
                 <button type="button" class="btn btn-danger" data-delete-employee="${employee.id}">Delete</button>
@@ -497,7 +517,8 @@ function renderReportsHeader(type) {
         access: ["Date", "Visitor", "Host", "Entry Time", "Exit Time", "Recorded By"],
         incidents: ["Date", "Title", "Type", "Location", "Severity", "Status", "Reported By"],
         visitors: ["Date", "Name", "ID / Passport", "Phone", "Purpose"],
-        audit: ["Date", "Action", "Entity", "Entity ID", "User", "Details"]
+        audit: ["Date", "Action", "Entity", "Entity ID", "User", "Details"],
+        alarms: ["Date/Time", "Type", "Status", "Camera"]
     };
 
     head.innerHTML = `<tr>${(headers[type] || headers.access).map((label) => `<th>${label}</th>`).join("")}</tr>`;
@@ -511,7 +532,7 @@ async function renderReportsTable(rows = [], type = "access") {
     renderReportsHeader(type);
 
     if (!rows.length) {
-        const colspan = { access: 6, incidents: 7, visitors: 5, audit: 6 }[type] || 6;
+        const colspan = { access: 6, incidents: 7, visitors: 5, audit: 6, alarms: 4 }[type] || 6;
         target.innerHTML = tableEmptyRow(colspan, "No report data found for that date range.");
         return;
     }
@@ -553,6 +574,18 @@ async function renderReportsTable(rows = [], type = "access") {
                 <td>${escapeHtml(row.nationalId)}</td>
                 <td>${escapeHtml(row.phoneNumber)}</td>
                 <td>${escapeHtml(row.purposeOfVisit)}</td>
+            </tr>
+        `).join("");
+        return;
+    }
+
+    if (type === "alarms") {
+        target.innerHTML = rows.map((row) => `
+            <tr>
+                <td>${escapeHtml(row.dateTime)}</td>
+                <td>${escapeHtml(row.alarmType)}</td>
+                <td>${escapeHtml(row.status)}</td>
+                <td>${escapeHtml(row.cameraName)}</td>
             </tr>
         `).join("");
         return;
@@ -607,11 +640,19 @@ function bindUserRowActions(users) {
             const usernameField = document.getElementById("editUsername");
             const passwordField = document.getElementById("editPassword");
             const roleField = document.getElementById("editRole");
+            const fullNameField = document.getElementById("editFullName");
+            const emailField = document.getElementById("editEmail");
+            const phoneField = document.getElementById("editPhoneNumber");
+            const statusField = document.getElementById("editAccountStatus");
 
             if (userIdField) userIdField.value = String(user.userId);
             if (usernameField) usernameField.value = user.username;
             if (passwordField) passwordField.value = "";
             if (roleField) roleField.value = user.role;
+            if (fullNameField) fullNameField.value = user.fullName || "";
+            if (emailField) emailField.value = user.email || "";
+            if (phoneField) phoneField.value = user.phoneNumber || "";
+            if (statusField) statusField.value = user.accountStatus || "Active";
 
             message("userMessage", `Editing user "${user.username}".`);
         });
@@ -694,6 +735,9 @@ function bindEmployeeRowActions(employees) {
             document.getElementById("editEmployeeName").value = employee.name;
             document.getElementById("editEmployeeDepartment").value = employee.department;
             document.getElementById("editEmployeePhone").value = employee.phoneNumber || "";
+            document.getElementById("editEmployeePosition").value = employee.position || "";
+            document.getElementById("editEmployeeEmail").value = employee.email || "";
+            document.getElementById("editEmployeeSubsidiaryId").value = employee.subsidiary_id || "";
 
             message("employeeMessage", `Editing employee "${employee.name}".`);
         });
@@ -780,6 +824,8 @@ function bindIncidentRowActions(incidents) {
             document.getElementById("editStatus").value = incident.status;
             document.getElementById("editDescription").value = incident.description;
             document.getElementById("editActionTaken").value = incident.actionTaken || "";
+            document.getElementById("editAssignedOfficer").value = incident.assignedOfficer || "";
+            document.getElementById("editSubsidiaryId").value = incident.subsidiaryId || "";
 
             message("incidentMessage", `Editing incident "${incident.title}".`);
         });
@@ -833,6 +879,9 @@ function bindUserForms() {
             const username = document.getElementById("newUsername")?.value.trim() || "";
             const password = document.getElementById("newPassword")?.value.trim() || "";
             const role = document.getElementById("newRole")?.value || "";
+            const fullName = document.getElementById("newFullName")?.value.trim() || "";
+            const email = document.getElementById("newEmail")?.value.trim() || "";
+            const phoneNumber = document.getElementById("newPhoneNumber")?.value.trim() || "";
 
             if (!username || !password || !role) {
                 message("userMessage", "All user fields are required.", true);
@@ -845,7 +894,7 @@ function bindUserForms() {
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                     },
-                    body: formBody({ username, password, role })
+                    body: formBody({ username, password, role, fullName, email, phoneNumber })
                 });
 
                 createForm.reset();
@@ -866,6 +915,10 @@ function bindUserForms() {
             const username = document.getElementById("editUsername")?.value.trim() || "";
             const password = document.getElementById("editPassword")?.value.trim() || "";
             const role = document.getElementById("editRole")?.value || "";
+            const fullName = document.getElementById("editFullName")?.value.trim() || "";
+            const email = document.getElementById("editEmail")?.value.trim() || "";
+            const phoneNumber = document.getElementById("editPhoneNumber")?.value.trim() || "";
+            const accountStatus = document.getElementById("editAccountStatus")?.value || "Active";
 
             if (!targetUserId) {
                 message("userMessage", "Select a user to edit first.", true);
@@ -883,7 +936,7 @@ function bindUserForms() {
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                     },
-                    body: formBody({ targetUserId, username, password, role })
+                    body: formBody({ targetUserId, username, password, role, fullName, email, phoneNumber, accountStatus })
                 });
 
                 editForm.reset();
@@ -1069,6 +1122,18 @@ function bindIncidentForm() {
     const form = document.getElementById("incidentForm");
     if (!form) return;
 
+    async function loadDropdowns() {
+        const [users, subsidiaries] = await Promise.all([
+            api("/api/users"),
+            api("/api/subsidiaries")
+        ]);
+        const officerSel = document.getElementById("assignedOfficer");
+        officerSel.innerHTML = '<option value="">Unassigned</option>' + users.map(u => `<option value="${u.userId}">${escapeHtml(u.username)} (${escapeHtml(u.fullName)})</option>`).join("");
+        const subSel = document.getElementById("subsidiaryId");
+        subSel.innerHTML = '<option value="">No subsidiary</option>' + subsidiaries.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+    }
+    loadDropdowns();
+
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
 
@@ -1079,6 +1144,8 @@ function bindIncidentForm() {
         const status = document.getElementById("status")?.value || "";
         const description = document.getElementById("description")?.value.trim() || "";
         const actionTaken = document.getElementById("actionTaken")?.value.trim() || "";
+        const assignedOfficer = document.getElementById("assignedOfficer")?.value || "";
+        const subsidiaryId = document.getElementById("subsidiaryId")?.value || "";
 
         if (!title || !incidentType || !location || !severity || !status || !description) {
             message("incidentMessage", "All incident fields are required.", true);
@@ -1091,7 +1158,7 @@ function bindIncidentForm() {
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                 },
-                body: formBody({ title, incidentType, location, severity, status, description, actionTaken })
+                body: formBody({ title, incidentType, location, severity, status, description, actionTaken, assignedOfficer, subsidiaryId })
             });
             form.reset();
             message("incidentMessage", `Incident "${title}" saved successfully.`);
@@ -1105,6 +1172,18 @@ function bindIncidentEditForm() {
     const form = document.getElementById("incidentEditForm");
     if (!form) return;
 
+    async function loadDropdowns() {
+        const [users, subsidiaries] = await Promise.all([
+            api("/api/users"),
+            api("/api/subsidiaries")
+        ]);
+        const officerSel = document.getElementById("editAssignedOfficer");
+        officerSel.innerHTML = '<option value="">Unassigned</option>' + users.map(u => `<option value="${u.userId}">${escapeHtml(u.username)} (${escapeHtml(u.fullName)})</option>`).join("");
+        const subSel = document.getElementById("editSubsidiaryId");
+        subSel.innerHTML = '<option value="">No subsidiary</option>' + subsidiaries.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+    }
+    loadDropdowns();
+
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
 
@@ -1116,6 +1195,8 @@ function bindIncidentEditForm() {
         const status = document.getElementById("editStatus")?.value || "";
         const description = document.getElementById("editDescription")?.value.trim() || "";
         const actionTaken = document.getElementById("editActionTaken")?.value.trim() || "";
+        const assignedOfficer = document.getElementById("editAssignedOfficer")?.value || "";
+        const subsidiaryId = document.getElementById("editSubsidiaryId")?.value || "";
 
         if (!incidentId) {
             message("incidentMessage", "Select an incident to edit first.", true);
@@ -1128,7 +1209,7 @@ function bindIncidentEditForm() {
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                 },
-                body: formBody({ incidentId, title, incidentType, location, severity, status, description, actionTaken })
+                body: formBody({ incidentId, title, incidentType, location, severity, status, description, actionTaken, assignedOfficer, subsidiaryId })
             });
             form.reset();
             document.getElementById("editIncidentId").value = "";
@@ -1159,11 +1240,21 @@ function bindIncidentFilters() {
 function bindEmployeeForms() {
     const createForm = document.getElementById("employeeCreateForm");
     if (createForm) {
+        async function loadSubs() {
+            const subsidiaries = await api("/api/subsidiaries");
+            const sel = document.getElementById("employeeSubsidiaryId");
+            sel.innerHTML = '<option value="">No subsidiary</option>' + subsidiaries.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+        }
+        loadSubs();
+
         createForm.addEventListener("submit", async (event) => {
             event.preventDefault();
             const name = document.getElementById("employeeName")?.value.trim() || "";
             const department = document.getElementById("employeeDepartment")?.value.trim() || "";
             const phoneNumber = document.getElementById("employeePhone")?.value.trim() || "";
+            const position = document.getElementById("employeePosition")?.value.trim() || "";
+            const email = document.getElementById("employeeEmail")?.value.trim() || "";
+            const subsidiaryId = document.getElementById("employeeSubsidiaryId")?.value || "";
 
             if (!name || !department) {
                 message("employeeMessage", "Employee name and department are required.", true);
@@ -1176,7 +1267,7 @@ function bindEmployeeForms() {
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                     },
-                    body: formBody({ name, department, phoneNumber })
+                    body: formBody({ name, department, phoneNumber, position, email, subsidiaryId })
                 });
                 createForm.reset();
                 message("employeeMessage", `Employee "${name}" created successfully.`);
@@ -1189,12 +1280,22 @@ function bindEmployeeForms() {
 
     const editForm = document.getElementById("employeeEditForm");
     if (editForm) {
+        async function loadEditSubs() {
+            const subsidiaries = await api("/api/subsidiaries");
+            const sel = document.getElementById("editEmployeeSubsidiaryId");
+            sel.innerHTML = '<option value="">No subsidiary</option>' + subsidiaries.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+        }
+        loadEditSubs();
+
         editForm.addEventListener("submit", async (event) => {
             event.preventDefault();
             const employeeId = document.getElementById("editEmployeeId")?.value || "";
             const name = document.getElementById("editEmployeeName")?.value.trim() || "";
             const department = document.getElementById("editEmployeeDepartment")?.value.trim() || "";
             const phoneNumber = document.getElementById("editEmployeePhone")?.value.trim() || "";
+            const position = document.getElementById("editEmployeePosition")?.value.trim() || "";
+            const email = document.getElementById("editEmployeeEmail")?.value.trim() || "";
+            const subsidiaryId = document.getElementById("editEmployeeSubsidiaryId")?.value || "";
 
             if (!employeeId) {
                 message("employeeMessage", "Select an employee to edit first.", true);
@@ -1207,7 +1308,7 @@ function bindEmployeeForms() {
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
                     },
-                    body: formBody({ employeeId, name, department, phoneNumber })
+                    body: formBody({ employeeId, name, department, phoneNumber, position, email, subsidiaryId })
                 });
                 editForm.reset();
                 document.getElementById("editEmployeeId").value = "";

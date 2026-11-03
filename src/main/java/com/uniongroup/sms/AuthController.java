@@ -22,7 +22,7 @@ final class AuthController {
             return;
         }
 
-        String sql = "SELECT user_id, username, password, role FROM users WHERE username = ?";
+        String sql = "SELECT user_id, username, password, role, account_status FROM users WHERE username = ?";
 
         try (Connection connection = SmsApplication.getConnection();
              PreparedStatement ps = connection.prepareStatement(sql)) {
@@ -42,6 +42,11 @@ final class AuthController {
                 // Verify password (supports legacy + hashed)
                 if (!PasswordUtils.verifyPassword(password, storedPassword)) {
                     SmsApplication.sendJson(exchange, 401, "{\"message\":\"Invalid login credentials\"}");
+                    return;
+                }
+
+                if (!"Active".equalsIgnoreCase(SmsApplication.defaultString(rs.getString("account_status"), "Active"))) {
+                    SmsApplication.sendJson(exchange, 403, "{\"message\":\"Account is inactive\"}");
                     return;
                 }
 

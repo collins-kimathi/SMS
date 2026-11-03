@@ -14,7 +14,7 @@ final class ReportController {
     // Access logs within date range
     static void handleAccessReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
-        SmsApplication.requireAdmin(session);
+        SmsApplication.requireAdminOrManagement(session);
 
         Map<String, String> query = SmsApplication.parseQuery(exchange.getRequestURI());
         String startDate = SmsApplication.trim(query.get("startDate"));
@@ -66,7 +66,7 @@ final class ReportController {
     // Incident reports within date range
     static void handleIncidentReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
-        SmsApplication.requireAdmin(session);
+        SmsApplication.requireAdminOrManagement(session);
 
         Map<String, String> query = SmsApplication.parseQuery(exchange.getRequestURI());
         String startDate = SmsApplication.trim(query.get("startDate"));
@@ -114,7 +114,7 @@ final class ReportController {
     // Visitor registrations within date range
     static void handleVisitorReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
-        SmsApplication.requireAdmin(session);
+        SmsApplication.requireAdminOrManagement(session);
 
         Map<String, String> query = SmsApplication.parseQuery(exchange.getRequestURI());
         String startDate = SmsApplication.trim(query.get("startDate"));
@@ -159,7 +159,7 @@ final class ReportController {
     // Audit logs within date range
     static void handleAuditReport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
-        SmsApplication.requireAdmin(session);
+        SmsApplication.requireAdminOrManagement(session);
 
         Map<String, String> query = SmsApplication.parseQuery(exchange.getRequestURI());
         String startDate = SmsApplication.trim(query.get("startDate"));
@@ -202,10 +202,50 @@ final class ReportController {
         SmsApplication.sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
     }
 
+    // Alarm reports within date range
+    static void handleAlarmReport(HttpExchange exchange) throws IOException, SQLException {
+        SessionInfo session = SmsApplication.requireAuthenticated(exchange);
+        SmsApplication.requireAdminOrManagement(session);
+
+        Map<String, String> query = SmsApplication.parseQuery(exchange.getRequestURI());
+        String startDate = SmsApplication.trim(query.get("startDate"));
+        String endDate = SmsApplication.trim(query.get("endDate"));
+
+        if (startDate.isEmpty() || endDate.isEmpty()) {
+            SmsApplication.sendJson(exchange, 400, "{\"message\":\"Select both start date and end date\"}");
+            return;
+        }
+
+        String sql = ""
+            + "SELECT a.alarm_id, a.alarm_type, a.status, a.date_time, c.camera_name "
+            + "FROM alarm_events a JOIN cctv_devices c ON a.cctv_id = c.cctv_id "
+            + "WHERE DATE(a.date_time) BETWEEN ? AND ? "
+            + "ORDER BY a.date_time DESC";
+
+        List<String> rows = new ArrayList<>();
+        try (Connection connection = SmsApplication.getConnection();
+             PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setDate(1, java.sql.Date.valueOf(startDate));
+            ps.setDate(2, java.sql.Date.valueOf(endDate));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add("{"
+                        + "\"id\":" + rs.getInt("alarm_id") + ","
+                        + "\"alarmType\":\"" + SmsApplication.escapeJson(rs.getString("alarm_type")) + "\","
+                        + "\"status\":\"" + SmsApplication.escapeJson(rs.getString("status")) + "\","
+                        + "\"dateTime\":\"" + rs.getTimestamp("date_time") + "\","
+                        + "\"cameraName\":\"" + SmsApplication.escapeJson(rs.getString("camera_name")) + "\""
+                        + "}");
+                }
+            }
+        }
+        SmsApplication.sendJson(exchange, 200, "[" + String.join(",", rows) + "]");
+    }
+
     // Export report as CSV (download response)
     static void handleExport(HttpExchange exchange) throws IOException, SQLException {
         SessionInfo session = SmsApplication.requireAuthenticated(exchange);
-        SmsApplication.requireAdmin(session);
+        SmsApplication.requireAdminOrManagement(session);
 
         Map<String, String> query = SmsApplication.parseQuery(exchange.getRequestURI());
         String type = SmsApplication.trim(query.get("type"));

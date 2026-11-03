@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subsidiaries - Union Group Security</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="subsidiaries">
+    <nav>
+        <h2>Union <span class="brand-accent">Security</span></h2>
+        <div class="nav-links">
+            <a href="dashboard.html">Dashboard</a>
+            <a href="users.html">User Management</a>
+            <a href="employees.html">Employee Management</a>
+            <a href="subsidiaries.html" class="is-active">Subsidiaries</a>
+            <a href="cctv-monitoring.html">CCTV Monitoring</a>
+            <a href="reports.html">Reports</a>
+            <a href="audit-history.html">Audit History</a>
+            <a href="visitor-registration.html">Register Visitor</a>
+            <a href="access-control.html">Access Control</a>
+            <a href="incident-report.html">Report Incident</a>
+            <a href="notifications.html">Notifications</a>
+            <a href="login.html" class="btn btn-danger btn-nav" data-logout>Logout</a>
+        </div>
+    </nav>
+    <div class="container animate-fade page-shell">
+        <h1>Subsidiary Management</h1>
+        <div class="glass-panel">
+            <h3>Add Subsidiary</h3>
+            <form id="subsidiaryForm">
+                <input type="hidden" id="subsidiaryId">
+                <input type="text" id="name" placeholder="Subsidiary name" required>
+                <input type="text" id="location" placeholder="Location" required>
+                <input type="text" id="contactNumber" placeholder="Contact number">
+                <button type="submit" class="btn btn-primary">Save</button>
+            </form>
+            <p id="subsidiaryMessage"></p>
+        </div>
+        <div class="glass-panel">
+            <table>
+                <thead><tr><th>Name</th><th>Location</th><th>Contact</th><th>Actions</th></tr></thead>
+                <tbody id="subsidiaryTable"></tbody>
+            </table>
+        </div>
+    </div>
+    <script src="js/app.js"></script>
+    <script>
+        async function renderSubsidiaries() {
+            const rows = await api("/api/subsidiaries");
+            const tbody = document.getElementById("subsidiaryTable");
+            tbody.innerHTML = rows.map((r) => `<tr>
+                <td>${escapeHtml(r.name)}</td>
+                <td>${escapeHtml(r.location)}</td>
+                <td>${escapeHtml(r.contactNumber)}</td>
+                <td><button onclick="editSubsidiary(${r.id},'${escapeHtml(r.name)}','${escapeHtml(r.location)}','${escapeHtml(r.contactNumber)}')">Edit</button>
+                    <button onclick="deleteSubsidiary(${r.id})">Delete</button></td>
+            </tr>`).join("") || tableEmptyRow(4, "No subsidiaries found.");
+        }
+        function editSubsidiary(id, name, location, contact) {
+            document.getElementById("subsidiaryId").value = id;
+            document.getElementById("name").value = name;
+            document.getElementById("location").value = location;
+            document.getElementById("contactNumber").value = contact;
+        }
+        async function deleteSubsidiary(id) {
+            await api("/api/subsidiaries/delete", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"}, body: formBody({ subsidiaryId: id }) });
+            await renderSubsidiaries();
+        }
+        document.getElementById("subsidiaryForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const id = document.getElementById("subsidiaryId").value;
+            const name = document.getElementById("name").value;
+            const location = document.getElementById("location").value;
+            const contactNumber = document.getElementById("contactNumber").value;
+            const endpoint = id ? "/api/subsidiaries/update" : "/api/subsidiaries";
+            const body = id ? { subsidiaryId: id, name, location, contactNumber } : { name, location, contactNumber };
+            if (id) {
+                await api(endpoint, { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"}, body: formBody(body) });
+            } else {
+                await api(endpoint, { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"}, body: formBody(body) });
+            }
+            e.target.reset();
+            document.getElementById("subsidiaryId").value = "";
+            await renderSubsidiaries();
+        });
+        renderSubsidiaries();
+    </script>
+</body>
+</html>

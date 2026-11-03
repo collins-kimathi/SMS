@@ -68,6 +68,21 @@
                         </select>
                     </div>
 
+                    <div class="dashboard-grid">
+                        <div class="form-group">
+                            <label for="assignedOfficer">Assigned Officer</label>
+                            <select id="assignedOfficer" name="assignedOfficer">
+                                <option value="">Unassigned</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="subsidiaryId">Subsidiary</label>
+                            <select id="subsidiaryId" name="subsidiaryId">
+                                <option value="">No subsidiary</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <div class="form-group">
                         <label for="status">Status</label>
                         <select id="status" name="status" required>
@@ -148,6 +163,21 @@
                         </select>
                     </div>
 
+                    <div class="dashboard-grid">
+                        <div class="form-group">
+                            <label for="editAssignedOfficer">Assigned Officer</label>
+                            <select id="editAssignedOfficer">
+                                <option value="">Unassigned</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="editSubsidiaryId">Subsidiary</label>
+                            <select id="editSubsidiaryId">
+                                <option value="">No subsidiary</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <div class="form-group">
                         <label for="editDescription">Detailed Description</label>
                         <textarea id="editDescription" rows="6" required placeholder="Update the incident description"></textarea>
@@ -200,6 +230,8 @@
                         <th>Severity</th>
                         <th>Status</th>
                         <th>Reported By</th>
+                        <th>Assigned Officer</th>
+                        <th>Subsidiary</th>
                         <th>Action Taken</th>
                         <th>Description</th>
                         <th>Actions</th>

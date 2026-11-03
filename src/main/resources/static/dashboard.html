@@ -14,11 +14,14 @@
             <a href="dashboard.html" class="is-active">Dashboard</a>
             <a href="users.html">User Management</a>
             <a href="employees.html">Employee Management</a>
+            <a href="subsidiaries.html">Subsidiaries</a>
+            <a href="cctv-monitoring.html">CCTV Monitoring</a>
             <a href="reports.html">Reports</a>
             <a href="audit-history.html">Audit History</a>
             <a href="visitor-registration.html">Register Visitor</a>
             <a href="access-control.html">Access Control</a>
             <a href="incident-report.html">Report Incident</a>
+            <a href="notifications.html">Notifications</a>
             <a href="login.html" class="btn btn-danger btn-nav" data-logout>Logout</a>
         </div>
     </nav>
@@ -57,6 +60,18 @@
                 <p class="stat-label">Incidents Logged</p>
                 <h2 id="incidentCount">0</h2>
                 <p>Reports recorded by the security team.</p>
+            </div>
+
+            <div class="glass-panel stat-card">
+                <p class="stat-label">Active Alarms</p>
+                <h2 id="alarmCount">0</h2>
+                <p>Unresolved alarm events from CCTV devices.</p>
+            </div>
+
+            <div class="glass-panel stat-card">
+                <p class="stat-label">CCTV Devices</p>
+                <h2 id="cctvCount">0</h2>
+                <p>Cameras monitored across subsidiaries.</p>
             </div>
         </div>
 
