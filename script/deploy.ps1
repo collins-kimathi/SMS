@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 # Get the root directory of the project (2 levels up from this script)
 $RootDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+Set-Location -LiteralPath $RootDir
 
 # Directory where compiled Java .class files will be stored
 $OutDir = Join-Path $RootDir "target\classes"
@@ -108,14 +109,17 @@ if ([string]::IsNullOrWhiteSpace($PortValue)) {
 
 
 # Check if MySQL JDBC driver file exists
-if (-not (Test-Path -LiteralPath $JdbcJar)) {
+if ([string]::IsNullOrWhiteSpace($JdbcJar) -or -not (Test-Path -LiteralPath $JdbcJar -PathType Leaf)) {
     $bundledHint = if ($BundledJars.Count -gt 0) { $BundledJars[0].FullName } else { "No mysql-connector-j*.jar found under $(Join-Path $RootDir 'lib')." }
     throw "MySQL JDBC jar not found at: $JdbcJar`nSet JDBC_JAR in .env to a valid jar path, or place the driver under the project's lib folder. $bundledHint"
 }
 
+try { $PortNumber = [int]$PortValue } catch { throw "PORT must be a number from 1 to 65535." }
+if ($PortNumber -lt 1 -or $PortNumber -gt 65535) { throw "PORT must be a number from 1 to 65535." }
+
 
 # Check if the selected port is already in use
-$existing = Get-NetTCPConnection -LocalPort ([int]$PortValue) -State Listen -ErrorAction SilentlyContinue |
+$existing = Get-NetTCPConnection -LocalPort $PortNumber -State Listen -ErrorAction SilentlyContinue |
     Select-Object -First 1
 
 # If port is in use, display which process is using it and stop
@@ -145,7 +149,7 @@ $JavaSources = Get-ChildItem -Path (Join-Path $RootDir "src\main\java\com\uniong
 # Compile Java files using javac
 # -cp → classpath (includes MySQL driver)
 # -d → output directory
-& $Javac -cp $JdbcJar -d $OutDir $JavaSources
+& $Javac -encoding UTF-8 -d $OutDir $JavaSources
 
 # If compilation fails, exit with error code
 if ($LASTEXITCODE -ne 0) {

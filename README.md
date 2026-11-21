@@ -15,11 +15,43 @@ A plain Java and MySQL web application for managing security operations. The ser
 - JDK 21 or newer (`java` and `javac`)
 - MySQL 8 or newer, running locally or reachable over the network
 - MySQL Connector/J jar
-- PowerShell 7 or Windows PowerShell 5.1 to use the included Windows scripts
+- A shell to use the included launcher (`PowerShell` on Windows or `sh` on Linux/macOS)
+- MySQL Connector/J (the JDBC driver; MySQL Server alone does not include the Java driver)
 
-## Run on Windows
+## Setup (Windows, Linux, and macOS)
 
-Open PowerShell in the project directory. Install a JDK if needed:
+Install a JDK 21 or newer and MySQL 8 or newer. Start MySQL, then create and seed the database (enter your MySQL root password when prompted):
+
+```sh
+mysql -u root -p < database/schema.sql
+```
+
+The schema creates `sms_db` and starter accounts. Create a dedicated MySQL user with access to that database, or configure another existing user in `.env`.
+
+Copy `.env.example` to `.env` and set the connection URL, username, and password. The default URL works for a local MySQL server on port 3306:
+
+```text
+SMS_DB_URL=jdbc:mysql://localhost:3306/sms_db?serverTimezone=UTC
+SMS_DB_USER=sms_user
+SMS_DB_PASSWORD=your_password
+PORT=9090
+```
+
+Place a `mysql-connector-j*.jar` file under `lib/`, or set `JDBC_JAR` in `.env` to its path. The project includes a copy under `lib/`.
+
+Start the app from the project directory:
+
+```powershell
+.\setup_sms.ps1
+```
+
+```sh
+sh ./run.sh
+```
+
+Open <http://localhost:9090>. Both launchers compile the Java source before starting the server. To use another port, set `PORT` in `.env`.
+
+For Windows, install a JDK if needed:
 
 ```powershell
 winget install Microsoft.OpenJDK.21
@@ -32,34 +64,18 @@ java -version
 javac -version
 ```
 
-Create and seed the database (enter your MySQL root password when prompted):
-
-```powershell
-Get-Content .\database\schema.sql | mysql -u root -p
-```
-
-Create local configuration and edit it with the credentials for a MySQL user that can access `sms_db`:
+Create local configuration:
 
 ```powershell
 Copy-Item .env.example .env
 notepad .env
 ```
 
-Place a `mysql-connector-j*.jar` file somewhere under `lib\`. The deploy script discovers it automatically. If you keep the jar elsewhere, set `JDBC_JAR` in `.env` to its full path.
-
-Start the server:
-
-```powershell
-.\setup_sms.ps1
-```
-
-The script compiles the Java source and starts the server on port 9090 by default. Open <http://localhost:9090>. To use another port, set `PORT` in `.env`.
-
-You can run `script\deploy.ps1` directly after creating `.env` and placing the JDBC jar.
+The Windows script discovers the included JDBC driver automatically.
 
 ## Run manually
 
-From the project root, configure `SMS_DB_URL`, `SMS_DB_USER`, and `SMS_DB_PASSWORD` in the environment, then compile and run (replace the jar path if needed):
+The launchers load `.env` automatically. For a manual run, configure `SMS_DB_URL`, `SMS_DB_USER`, and `SMS_DB_PASSWORD`, then compile and run (replace the jar path if needed). On Windows use `;` between classpath entries; on Linux/macOS use `:`.
 
 ```powershell
 $jdbc = (Get-ChildItem .\lib -Filter 'mysql-connector-j*.jar' -Recurse | Select-Object -First 1).FullName

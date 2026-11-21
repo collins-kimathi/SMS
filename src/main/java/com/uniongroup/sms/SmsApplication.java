@@ -25,14 +25,14 @@ import java.util.Map;
 public class SmsApplication {
 
     // Core application settings, security constants, and required database configuration.
-    private static final int DEFAULT_PORT = 8080;
+    private static final int DEFAULT_PORT = 9090;
     private static final String STATIC_ROOT = "/static";
     private static final Path SOURCE_STATIC_DIR = Path.of("src", "main", "resources", "static");
     private static final String SESSION_COOKIE = "sms_session";
     private static final long SESSION_TTL_MILLIS = 8L * 60L * 60L * 1000L;
-    private static final String DB_URL = requireEnv("SMS_DB_URL");
-    private static final String DB_USER = requireEnv("SMS_DB_USER");
-    private static final String DB_PASSWORD = requireEnv("SMS_DB_PASSWORD");
+    private static final String DB_URL = requireConfig("SMS_DB_URL");
+    private static final String DB_USER = requireConfig("SMS_DB_USER");
+    private static final String DB_PASSWORD = requireConfig("SMS_DB_PASSWORD");
     private static final Map<String, String> CONTENT_TYPES = new HashMap<>();
 
     static {
@@ -646,7 +646,7 @@ public class SmsApplication {
             return parsePort(args[0]);
         }
 
-        String envPort = System.getenv("PORT");
+        String envPort = EnvConfig.get("PORT");
         if (envPort != null && !envPort.isBlank()) {
             return parsePort(envPort);
         }
@@ -666,8 +666,8 @@ public class SmsApplication {
         }
     }
 
-    private static String requireEnv(String key) {
-        String value = System.getenv(key);
+    private static String requireConfig(String key) {
+        String value = EnvConfig.get(key);
         if (value == null || value.isBlank()) {
             throw new IllegalStateException("Missing required environment variable: " + key);
         }
